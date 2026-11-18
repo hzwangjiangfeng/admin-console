@@ -19,7 +19,7 @@ npm run dev
 - Mock 提供 35 篇种子文章，拦截真正的 Axios HTTP 请求，并在浏览器内存中处理增删改查。
 - **整页刷新会恢复种子数据，不提供数据持久化。** 关闭页面后也不保证保留查询缓存。
 - 设置 `VITE_ENABLE_MOCK=false` 可关闭 Mock；须另行提供真实 `/api/admin/articles` 服务。
-- 生产构建不会启动 MSW。部署时需要真实 `/api` 服务或反向代理，并为 `/admin/*` 等前端路径配置 SPA 回退至 `index.html`。
+- 生产构建默认不会启动 MSW；设置 `VITE_DEMO_MODE=true` 可部署无后端的演示版。正式使用需要关闭演示模式并提供真实 `/api` 服务或反向代理。
 - 本项目不包含后端、数据库、Redis、账号权限、富文本解析或自动保存。
 
 ### Mock 请求异常排查
@@ -69,3 +69,16 @@ npm run test:e2e -- --project=chromium
 - [增量实施计划](docs/superpowers/plans/2026-11-18-article-time-sorting-implementation.md)
 
 本项目使用本地 Git 进行版本管理；远程仓库和推送需单独配置与授权。已版本化的 `.env.development` 只保存公共 Mock 开关，密钥或个人配置应放入已忽略的 `.env.local`，不要写入源码或提交。
+
+## 部署到 Vercel（MSW 演示版）
+
+1. 在 Vercel 导入此 GitHub 仓库，Framework Preset 选择 **Vite**，Root Directory 保持仓库根目录。
+2. Node.js 选择 **24.x**，构建命令为 `npm run build`，输出目录为 `dist`。
+3. 添加环境变量 `VITE_DEMO_MODE=true`，选中需要的 Production 和 Preview 环境，然后部署。修改环境变量后须重新部署。
+4. 打开 `/admin/articles`，验证列表、新增、编辑、删除及详情页刷新。
+
+仓库的 `vercel.json` 已配置 `/admin/*` 路由回退；API 路径不会被重写为 HTML。MSW 在浏览器启动时就绪后再挂载应用，`public/mockServiceWorker.js` 随静态资源发布。
+
+演示模式无需后端或数据库。每个页面的 Mock 数据相互独立，刷新会恢复示例文章。需要允许浏览器 Service Worker，且不要启用其 Bypass for network。
+
+正式对接后端时移除 `VITE_DEMO_MODE` 或设为 `false`，并配置 `/api` 代理。所有 `VITE_` 变量都会进入浏览器代码，不能用于保存密钥。
