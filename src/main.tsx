@@ -11,6 +11,12 @@ async function bootstrap() {
     const { worker } = await import('./mocks/browser');
     await worker.start({ onUnhandledRequest: 'bypass' });
   }
-  createRoot(document.getElementById('root')!).render(<StrictMode><AppProviders queryClient={createAppQueryClient()}><RouterProvider router={createAppRouter()} /></AppProviders></StrictMode>);
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <AppProviders queryClient={createAppQueryClient()}>
+        <RouterProvider router={createAppRouter()} />
+      </AppProviders>
+    </StrictMode>,
+  );
 }
 void bootstrap();

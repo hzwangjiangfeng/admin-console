@@ -5,7 +5,9 @@ export function useSessionActive() {
   const active = useRef(false);
   useEffect(() => {
     active.current = true;
-    return () => { active.current = false; };
+    return () => {
+      active.current = false;
+    };
   }, []);
   return useCallback(() => active.current, []);
 }
