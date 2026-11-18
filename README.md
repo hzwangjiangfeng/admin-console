@@ -82,3 +82,12 @@ npm run test:e2e -- --project=chromium
 演示模式无需后端或数据库。每个页面的 Mock 数据相互独立，刷新会恢复示例文章。需要允许浏览器 Service Worker，且不要启用其 Bypass for network。
 
 正式对接后端时移除 `VITE_DEMO_MODE` 或设为 `false`，并配置 `/api` 代理。所有 `VITE_` 变量都会进入浏览器代码，不能用于保存密钥。
+
+### GitHub 自动部署
+
+Vercel 项目 `wjf2/article-admin` 已关联 `hzwangjiangfeng/article-admin`，生产分支为 `main`。推送或合并到 `main` 后，Vercel 自动构建并更新生产站点；其他分支用于预览部署。Production 和 Preview 环境已配置 `VITE_DEMO_MODE=true`。
+
+- 线上入口：https://article-admin-two.vercel.app/admin/articles
+- 部署记录：https://vercel.com/wjf2/article-admin/deployments
+
+如果自动部署停止，请检查 Vercel 项目的 Git 关联，以及 GitHub 中 Vercel App 对本仓库的访问权限。
