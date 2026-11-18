@@ -13,3 +13,6 @@ test-results/
 !.env.development
 *.log
 coverage/
+
+.vercel/
+.vercel
