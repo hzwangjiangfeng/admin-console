@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { App, Alert, Button, Card } from 'antd';
 import { useSessionActive } from '../../hooks/useSessionActive';
 import ArticleForm from '../../components/articles/ArticleForm';

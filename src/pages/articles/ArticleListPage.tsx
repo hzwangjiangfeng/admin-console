@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router';
 import { Alert, App, Button, Card, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import { CHANNEL_OPTIONS, getChannelName } from '../../constants/channels';

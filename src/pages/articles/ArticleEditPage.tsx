@@ -1,4 +1,4 @@
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, App, Button, Card, Skeleton } from 'antd';
 import { parseArticleId } from '../../utils/articles/listParams';
 import { getArticleListReturnTo } from '../../utils/articles/navigation';

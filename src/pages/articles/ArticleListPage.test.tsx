@@ -135,9 +135,11 @@ it('carries the entire source list URL to article actions', async () => {
   const { user, router } = renderApp('/admin/articles?page=1&channelId=1&sortOrder=asc');
   const title = await screen.findByText('React 实践 01');
   await user.click(within(title.closest('tr')!).getByRole('link', { name: '详情' }));
-  expect(router.state.location.state).toEqual({
-    from: '/admin/articles?page=1&channelId=1&sortOrder=asc',
-  });
+  await waitFor(() =>
+    expect(router.state.location.state).toEqual({
+      from: '/admin/articles?page=1&channelId=1&sortOrder=asc',
+    }),
+  );
 });
 it('shows empty results separately from request failure', async () => {
   const { router } = renderApp('/admin/articles?keyword=不存在');

@@ -6,7 +6,7 @@ import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { makeArticle } from '../../test/fixtures';
 async function fill(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByRole('textbox', { name: '标题' }), '新文章');
+  await user.type(await screen.findByRole('textbox', { name: '标题' }), '新文章');
   await user.click(screen.getByRole('combobox', { name: '所属频道' }));
   await user.click(await screen.findByRole('option', { name: '技术' }));
   await user.type(screen.getByRole('textbox', { name: '正文' }), '正文');
@@ -20,8 +20,8 @@ it('returns to default list and opens the exact created article from persistent 
   );
   await waitFor(() => expect(screen.getByText('新增成功')).toBeVisible());
   await user.click(screen.getByRole('button', { name: '查看文章' }));
-  expect(router.state.location.pathname).toBe('/admin/articles/36');
   expect(await screen.findByRole('heading', { name: '新文章' })).toBeVisible();
+  expect(router.state.location.pathname).toBe('/admin/articles/36');
 });
 it('keeps creation successful when list refresh fails and retries only the query', async () => {
   let posts = 0;
@@ -87,8 +87,10 @@ it('cancels to a remembered list without submitting', async () => {
   const { user, router } = renderApp('/admin/articles/new', {
     entries: [{ pathname: '/admin/articles/new', state: { from: '/admin/articles?page=2' } }],
   });
-  await user.click(screen.getByRole('button', { name: '取消' }));
-  expect(router.state.location.pathname + router.state.location.search).toBe(
-    '/admin/articles?page=2',
+  await user.click(await screen.findByRole('button', { name: '取消' }));
+  await waitFor(() =>
+    expect(router.state.location.pathname + router.state.location.search).toBe(
+      '/admin/articles?page=2',
+    ),
   );
 });

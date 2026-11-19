@@ -1,7 +1,8 @@
 import { ConfigProvider } from 'antd';
 import { render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider, type InitialEntry } from 'react-router-dom';
+import { createMemoryRouter, type InitialEntry } from 'react-router';
+import { RouterProvider } from 'react-router/dom';
 import type { QueryClient } from '@tanstack/react-query';
 import { AppProviders } from '../app/AppProviders';
 import { createAppQueryClient } from '../lib/queryClient';

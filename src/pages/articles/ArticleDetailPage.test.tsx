@@ -38,7 +38,9 @@ it.each([undefined, { from: 'https://evil.example/' }])(
     });
     await screen.findByRole('heading', { name: 'React 实践 01' });
     await user.click(screen.getByRole('button', { name: '返回列表' }));
-    expect(router.state.location.pathname + router.state.location.search).toBe('/admin/articles');
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe('/admin/articles'),
+    );
   },
 );
 it('never queries invalid article IDs', async () => {

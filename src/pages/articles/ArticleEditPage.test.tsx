@@ -110,8 +110,10 @@ it('preserves draft after PATCH validation failure and supports cancel to the or
   expect(await screen.findByText('保存校验失败')).toBeVisible();
   expect(title).toHaveValue('保留草稿');
   await user.click(screen.getByRole('button', { name: '取消' }));
-  expect(router.state.location.pathname + router.state.location.search).toBe(
-    '/admin/articles?page=2',
+  await waitFor(() =>
+    expect(router.state.location.pathname + router.state.location.search).toBe(
+      '/admin/articles?page=2',
+    ),
   );
 });
 it('ignores navigation from a late save after moving to another article draft', async () => {
