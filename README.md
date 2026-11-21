@@ -1,6 +1,6 @@
-# 文章管理后台
+# admin-console
 
-React + TypeScript + Vite 的文章 CRUD 示例，使用 Ant Design、React Router、TanStack Query、Axios 和 MSW。
+基于 React、TypeScript 和 Vite 的管理后台，当前提供文章管理模块。项目使用 Ant Design、React Router、TanStack Query、Axios 和 MSW。
 
 ## 环境与启动
 
