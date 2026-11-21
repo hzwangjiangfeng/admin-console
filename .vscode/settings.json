@@ -1,0 +1,7 @@
+{
+  "gitlens.hovers.currentLine.enabled": false,
+  "[javascript][typescript][typescriptreact][html][css][json][jsonc][markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}

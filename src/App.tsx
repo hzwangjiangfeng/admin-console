@@ -1,2 +1,4 @@
-import { Outlet } from 'react-router-dom';
-export default function App() { return <Outlet />; }
+import { Outlet } from 'react-router';
+export default function App() {
+  return <Outlet />;
+}

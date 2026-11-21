@@ -1,0 +1,11 @@
+# Generated files
+/dist/
+/coverage/
+/playwright-report/
+/test-results/
+/package-lock.json
+/public/mockServiceWorker.js
+
+# Design and implementation records
+/.superpowers/
+/docs/superpowers/
