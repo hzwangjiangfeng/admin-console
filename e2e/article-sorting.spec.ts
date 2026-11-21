@@ -73,6 +73,18 @@ test('updated-time sorting preserves filters, resets page and restores through b
   await expect(updated).not.toHaveAttribute('aria-sort');
 });
 
+test('going back immediately after reset restores the submitted keyword', async ({ page }) => {
+  const source = '/admin/articles?keyword=React';
+  await page.goto(source);
+  const keyword = page.getByRole('textbox', { name: '标题关键词' });
+  await expect(keyword).toHaveValue('React');
+  await page.getByRole('button', { name: '重置', exact: true }).click();
+  await expect(page).toHaveURL('http://127.0.0.1:5173/admin/articles');
+  await page.goBack();
+  await expect(page).toHaveURL(`http://127.0.0.1:5173${source}`);
+  await expect(keyword).toHaveValue('React');
+});
+
 test('reset restores default URL, controls and rows even for unsubmitted drafts', async ({
   page,
 }) => {
