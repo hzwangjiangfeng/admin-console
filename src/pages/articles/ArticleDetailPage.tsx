@@ -7,7 +7,7 @@ import { getChannelName } from '../../constants/channels';
 import styles from './ArticlePages.module.css';
 export default function ArticleDetailPage() {
   const id = parseArticleId(useParams().id);
-  return id === null ? <InvalidArticle /> : <ArticleDetailContent key={id} id={id} />;
+  return id === null ? <InvalidArticle /> : <ArticleDetailContent id={id} />;
 }
 function InvalidArticle() {
   const navigate = useNavigate(),
