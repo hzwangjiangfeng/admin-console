@@ -21,6 +21,9 @@ export default function AdminLayout() {
           <span>工作空间 / 文章管理</span>
         </header>
         <main className={styles.main}>
+          {import.meta.env.VITE_DEMO_MODE === 'true' && (
+            <p role="status">演示模式：数据仅保存在当前页面内存中，刷新后恢复示例数据。</p>
+          )}
           <Outlet />
         </main>
       </div>

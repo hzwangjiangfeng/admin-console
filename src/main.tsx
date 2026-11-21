@@ -8,8 +8,11 @@ import 'antd/dist/reset.css';
 import './styles.css';
 
 async function bootstrap() {
-  // 开发环境如果启用了本地接口，先等接口就绪，再挂载页面
-  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK === 'true') {
+  // 开发或演示模式启用 Mock 时，先等接口就绪，再挂载页面
+  if (
+    (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK === 'true') ||
+    import.meta.env.VITE_DEMO_MODE === 'true'
+  ) {
     const { worker } = await import('./mocks/browser');
     await worker.start({ onUnhandledRequest: 'bypass' });
   }
