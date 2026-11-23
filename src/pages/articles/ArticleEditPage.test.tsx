@@ -152,6 +152,32 @@ it('ignores navigation from a late save after moving to another article draft', 
   expect(screen.getByRole('textbox', { name: '标题' })).toHaveValue('B 的未保存草稿');
   expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
 });
+it('keeps the new article draft when a previous detail request finishes late', async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started = false;
+  server.use(
+    http.get('*/api/admin/articles/1', async () => {
+      started = true;
+      await pending;
+      return HttpResponse.json(makeArticle({ title: '上一篇文章' }));
+    }),
+  );
+  const { router, user } = renderApp('/admin/articles/1/edit');
+  await waitFor(() => expect(started).toBe(true));
+  await act(() => router.navigate('/admin/articles/2/edit'));
+  const title = await screen.findByRole('textbox', { name: '标题' });
+  expect(title).toHaveValue('Vue 笔记 02');
+  await user.clear(title);
+  await user.type(title, '第二篇的草稿');
+  await act(async () => {
+    release();
+    await pending;
+  });
+  expect(screen.getByRole('textbox', { name: '标题' })).toHaveValue('第二篇的草稿');
+});
 it('does not mount an editor for invalid article IDs', async () => {
   renderApp('/admin/articles/0/edit');
   expect(await screen.findByText('无效的文章地址')).toBeVisible();
