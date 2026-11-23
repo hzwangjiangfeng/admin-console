@@ -12,7 +12,6 @@ export const articleDetailOptions = (id: number) =>
   >({
     queryKey: articleKeys.detail(id),
     queryFn: ({ signal }) => getArticle(id, signal),
-    staleTime: 60_000,
   });
 export const useArticleDetailQuery = (id: number) => useQuery(articleDetailOptions(id));
 export const useArticleListQuery = (p: ArticleListParams) =>

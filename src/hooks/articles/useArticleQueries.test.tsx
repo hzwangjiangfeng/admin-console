@@ -7,11 +7,11 @@ import { makeArticle } from '../../test/fixtures';
 it('serves fresh details without requesting and refreshes stale data', async () => {
   const client = createAppQueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(articleKeys.detail(1), makeArticle({ title: '新鲜缓存' }));
-  expect((await client.fetchQuery(articleDetailOptions(1))).title).toBe('新鲜缓存');
+  expect((await client.query(articleDetailOptions(1))).title).toBe('新鲜缓存');
   client.setQueryData(articleKeys.detail(1), makeArticle({ title: '旧缓存' }), {
     updatedAt: Date.now() - 61000,
   });
-  expect((await client.fetchQuery(articleDetailOptions(1))).title).toBe('React 实践 01');
+  expect((await client.query(articleDetailOptions(1))).title).toBe('React 实践 01');
   client.clear();
 });
 it('garbage collects only after five minutes without observers', async () => {

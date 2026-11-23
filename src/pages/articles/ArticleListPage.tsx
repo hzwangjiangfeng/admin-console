@@ -25,7 +25,7 @@ export default function ArticleListPage() {
   const from = createArticleListState(location);
 
   /* 筛选表单回填：URL -> 表单 */
-  // 创建筛选表单实例。keyword 是字符串，可以留空；channelId 是可选的数字
+  // 创建筛选表单实例
   const [form] = Form.useForm<{ keyword: string; channelId?: number }>();
   // 依赖完整的查询串，URL 的其他查询参数（翻页或排序）发生变化时，也强制重新同步表单，用列表当前的筛选条件覆盖尚未提交的输入。比如：
   // 1. 当前列表按 React 筛选，输入框里显示 React
@@ -53,20 +53,18 @@ export default function ArticleListPage() {
   /* 删除文章 */
   // 控制弹窗展示，null 表示不显示弹窗
   const [deleteId, setDeleteId] = useState<number | null>(null);
-  // 删除文章的异步请求状态
+  // 删除文章的异步操作
   const deletion = useDeleteArticleMutation();
   // 删除文章后，检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页。false 表示不需要检查，true 表示需要检查
   const [repairEmptyPage, setRepairEmptyPage] = useState(false);
   // Ant Design 的 App.useApp() 提供了全局的 message，在 src/app/AppProviders.tsx 中已配置
   const { message } = App.useApp();
+  // 删除确认操作
   async function confirmDelete() {
-    // 避免误删除或重复提交
     if (deleteId === null || deletion.isPending) return;
     try {
-      // 调用删除接口
       await deletion.mutateAsync(deleteId);
     } catch {
-      // 删除失败时，直接退出，保留弹窗
       return;
     }
     // 关闭删除确认弹窗
@@ -85,7 +83,7 @@ export default function ArticleListPage() {
     else setRepairEmptyPage(false);
   }, [repairEmptyPage, query.isFetching, query.isError, query.data, params, setSearch]);
 
-  // 定义表格列
+  /* 定义表格列 */
   const columns: TableProps<ArticleListItem>['columns'] = [
     {
       title: '文章标题',
@@ -148,7 +146,7 @@ export default function ArticleListPage() {
     },
   ];
 
-  // 渲染组件数据
+  /* 渲染组件数据 */
   return (
     <section>
       {/* 页面头部：标题、简介和新增文章入口 */}
