@@ -24,7 +24,7 @@ export default function ArticleListPage() {
   // 把列表地址包装成 { from: 列表地址 }，供 Link 跳转时传给目标页，方便用户返回原来的列表
   const from = createArticleListState(location);
 
-  /* 筛选表单回填：URL -> 表单 */
+  /* URL -> 筛选表单 */
   // 创建筛选表单实例
   const [form] = Form.useForm<{ keyword: string; channelId?: number }>();
   // 依赖完整的查询串，URL 的其他查询参数（翻页或排序）发生变化时，也强制重新同步表单，用列表当前的筛选条件覆盖尚未提交的输入。比如：
@@ -38,20 +38,19 @@ export default function ArticleListPage() {
     form.setFieldsValue({ keyword: params.keyword, channelId: params.channelId ?? undefined });
   }, [form, params.keyword, params.channelId, searchString]);
 
-  /* 查询和重置：表单 -> URL */
-  // 更新文章列表的部分查询参数，保留未修改的条件，并同步到 URL，驱动列表按新条件查询
+  /* 筛选表单 -> URL */
+  // 查询：更新文章列表的部分查询参数，并同步到 URL，驱动当前组件按新条件重新渲染
   function changeParams(patch: Partial<ArticleListParams>) {
     setSearch(serializeArticleParams({ ...params, ...patch }), { flushSync: true });
   }
-  // 重置表单和查询条件，清空关键词和频道选择，回到第一页
+  // 重置：清空尚未提交的筛选输入，URL 查询参数全部恢复默认值，驱动当前组件按新条件重新渲染
   function resetParams() {
-    // 清空尚未提交的筛选内容
     form.setFieldsValue({ keyword: '', channelId: undefined });
     setSearch(new URLSearchParams(), { flushSync: true });
   }
 
   /* 删除文章 */
-  // 控制弹窗展示，null 表示不显示弹窗
+  // 控制弹窗展示，null 表示不显示弹窗，非 null 表示打开弹窗并记录删除目标
   const [deleteId, setDeleteId] = useState<number | null>(null);
   // 删除文章的异步操作
   const deletion = useDeleteArticleMutation();
@@ -135,7 +134,7 @@ export default function ArticleListPage() {
             danger
             aria-label={`删除《${row.title}》`}
             onClick={() => {
-              deletion.reset();
+              deletion.reset(); // 关掉上一次的错误提示
               setDeleteId(row.id);
             }}
           >

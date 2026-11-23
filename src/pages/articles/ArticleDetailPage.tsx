@@ -6,7 +6,7 @@ import { useArticleDetailQuery } from '../../hooks/articles/useArticleQueries';
 import { getChannelName } from '../../constants/channels';
 import styles from './ArticlePages.module.css';
 
-/* 文章详情页组件：校验路由中的文章 ID，无效时显示错误提示，有效时渲染详情组件 */
+/* 文章详情页组件 */
 export default function ArticleDetailPage() {
   const id = parseArticleId(useParams().id);
   return id === null ? <InvalidArticle /> : <ArticleDetailContent id={id} />;
