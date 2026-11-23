@@ -97,7 +97,7 @@ npm run test:e2e -- --project=chromium
 
 Vercel 项目 `wjf2/article-admin` 已关联 `hzwangjiangfeng/admin-console`，生产分支为 `main`。推送或合并到 `main` 后，Vercel 自动构建并更新生产站点；其他分支用于预览部署。Production 和 Preview 环境已配置 `VITE_DEMO_MODE=true`。
 
-- 线上入口：https://article-admin-two.vercel.app/admin/articles
+- 线上入口：https://admin-console-wjf.vercel.app/admin/articles
 - 部署记录：https://vercel.com/wjf2/article-admin/deployments
 
 如果自动部署停止，请检查 Vercel 项目的 Git 关联，以及 GitHub 中 Vercel App 对本仓库的访问权限。
