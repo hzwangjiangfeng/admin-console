@@ -1,4 +1,5 @@
 import type { CreateArticleInput, UpdateArticleInput, FieldErrors } from '../../types/articles';
+import { isArticleStatus } from '../../constants/articleStatuses';
 import { isChannelId } from '../../constants/channels';
 export type ValidationResult<T> =
   { ok: true; values: T } | { ok: false; fieldErrors: FieldErrors; formError?: string };
@@ -20,11 +21,17 @@ export function validateArticleInput(
     return { ok: false, fieldErrors, formError: '请求体必须是对象' };
   const input = value as Record<string, unknown>;
   const allowed = ['title', 'channelId', 'content'];
+  if (mode === 'update') allowed.push('status');
   if (Object.keys(input).some((key) => !allowed.includes(key)))
     return { ok: false, fieldErrors, formError: '包含不可编辑的字段' };
   if (mode === 'update' && Object.keys(input).length === 0)
     return { ok: false, fieldErrors, formError: '至少提交一个可编辑字段' };
   const values: UpdateArticleInput = {};
+  if (mode === 'update' && Object.hasOwn(input, 'status')) {
+    if (!isArticleStatus(input.status))
+      return { ok: false, fieldErrors, formError: '无效的文章状态' };
+    values.status = input.status;
+  }
   if (mode === 'create' || Object.hasOwn(input, 'title')) {
     if (
       typeof input.title !== 'string' ||

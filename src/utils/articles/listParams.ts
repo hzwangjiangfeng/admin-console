@@ -1,10 +1,12 @@
 import type { ArticleListParams } from '../../types/articles';
+import { isArticleStatus } from '../../constants/articleStatuses';
 import { isChannelId } from '../../constants/channels';
 export const DEFAULT_ARTICLE_PARAMS: ArticleListParams = {
   page: 1,
   pageSize: 10,
   keyword: '',
   channelId: null,
+  status: null,
   sortBy: 'createdAt',
   sortOrder: 'desc',
 };
@@ -15,11 +17,13 @@ export function parseArticleId(raw: string | undefined | null): number | null {
 }
 export function normalizeArticleParams(search: URLSearchParams): ArticleListParams {
   const channel = parseArticleId(search.get('channelId'));
+  const status = search.get('status');
   return {
     page: parseArticleId(search.get('page')) ?? 1,
     pageSize: parseArticleId(search.get('pageSize')) ?? 10,
     keyword: (search.get('keyword') ?? '').trim(),
     channelId: channel !== null && isChannelId(channel) ? channel : null,
+    status: isArticleStatus(status) ? status : null,
     sortBy: search.get('sortBy') === 'updatedAt' ? 'updatedAt' : 'createdAt',
     sortOrder: search.get('sortOrder') === 'asc' ? 'asc' : 'desc',
   };
@@ -33,5 +37,6 @@ export function serializeArticleParams(params: ArticleListParams) {
   });
   if (params.keyword) search.set('keyword', params.keyword);
   if (params.channelId !== null) search.set('channelId', String(params.channelId));
+  if (params.status !== null) search.set('status', params.status);
   return search;
 }

@@ -45,6 +45,22 @@ it('uses ID as stable tie breaker in both sort directions', async () => {
     (await getArticles({ ...DEFAULT_ARTICLE_PARAMS, sortOrder: 'asc' })).items.map((a) => a.id),
   ).toEqual([1, 2, 3]);
 });
+
+it('applies all filters before pagination and computes filtered totals', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: 'React 01', status: 'published' }),
+    makeArticle({ id: 2, title: 'React 02', status: 'published' }),
+    makeArticle({ id: 3, title: 'React 03', status: 'archived' }),
+    makeArticle({ id: 4, title: 'React 04', status: 'published', channelId: 2 }),
+    makeArticle({ id: 5, title: 'Vue 05', status: 'published' }),
+  ]);
+  const params = normalizeArticleParams(
+    new URLSearchParams('status=published&keyword=React&channelId=1&pageSize=1&page=2'),
+  );
+  const list = await getArticles(params);
+  expect(list.total).toBe(2);
+  expect(list.items).toMatchObject([{ id: 1, status: 'published' }]);
+});
 it('returns zero total for unmatched titles', async () =>
   expect(await getArticles({ ...DEFAULT_ARTICLE_PARAMS, keyword: '不存在' })).toEqual({
     items: [],

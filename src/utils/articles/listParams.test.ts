@@ -5,6 +5,7 @@ const defaults = {
   pageSize: 10,
   keyword: '',
   channelId: null,
+  status: null,
   sortBy: 'createdAt',
   sortOrder: 'desc',
 };
@@ -34,6 +35,17 @@ it('normalizes valid filters and ignores unknown arguments', () => {
   expect(
     normalizeArticleParams(new URLSearchParams('channelId=99&sortBy=bad&sortOrder=bad')),
   ).toEqual(defaults);
+});
+
+it('round trips supported statuses and drops unsupported ones', () => {
+  for (const status of ['draft', 'published', 'archived']) {
+    const params = normalizeArticleParams(new URLSearchParams({ status }));
+    expect(params.status).toBe(status);
+    expect(serializeArticleParams(params).get('status')).toBe(status);
+  }
+  const invalid = normalizeArticleParams(new URLSearchParams('status=all'));
+  expect(invalid.status).toBeNull();
+  expect(serializeArticleParams(invalid).has('status')).toBe(false);
 });
 it.each(['0', '-1', '12abc', '1.5', 'Infinity', '9007199254740992', '//3'])(
   'rejects invalid ID %s',

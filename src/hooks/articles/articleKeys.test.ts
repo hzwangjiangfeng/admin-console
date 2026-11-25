@@ -11,6 +11,12 @@ it('shares canonical keys for equivalent URLs and separates list/detail namespac
   expect(articleKeys.detail(3)).toEqual(['articles', 'detail', 3]);
   expect(articleKeys.lists()).toEqual(['articles', 'list']);
 });
+
+it('caches published results separately from all statuses', () => {
+  const key = (search: string) =>
+    articleKeys.list(normalizeArticleParams(new URLSearchParams(search)));
+  expect(key('status=published')).not.toEqual(key(''));
+});
 it('separates the two sort fields and directions in list caches', () => {
   const created = articleKeys.list(
     normalizeArticleParams(new URLSearchParams('sortBy=createdAt&sortOrder=desc')),

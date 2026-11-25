@@ -23,14 +23,24 @@ it('shows the new article when only the route ID changes', async () => {
   server.use(
     http.get('*/api/admin/articles/:id', ({ params }) => {
       const id = Number(params.id);
-      return HttpResponse.json(makeArticle({ id, title: `文章 ${id}`, content: `正文 ${id}` }));
+      return HttpResponse.json(
+        makeArticle({
+          id,
+          title: `文章 ${id}`,
+          content: `正文 ${id}`,
+          status: id === 1 ? 'published' : 'archived',
+        }),
+      );
     }),
   );
   const { router } = renderApp('/admin/articles/1');
   expect(await screen.findByRole('heading', { name: '文章 1' })).toBeVisible();
+  expect(screen.getByText('已发布')).toBeVisible();
   await act(() => router.navigate('/admin/articles/2'));
   expect(await screen.findByRole('heading', { name: '文章 2' })).toBeVisible();
   expect(screen.getByText('正文 2')).toBeVisible();
+  expect(screen.getByText('已下架')).toBeVisible();
+  expect(screen.queryByText('已发布')).not.toBeInTheDocument();
   expect(screen.queryByText('正文 1')).not.toBeInTheDocument();
 });
 it('returns to the full originating list address', async () => {

@@ -6,6 +6,7 @@ export function makeArticle(overrides: Partial<Article> = {}): Article {
     title: '示例文章',
     channelId: 1,
     content: '文章正文',
+    status: 'draft',
     createdAt,
     updatedAt: createdAt,
     ...overrides,

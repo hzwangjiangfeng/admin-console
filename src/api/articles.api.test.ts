@@ -22,6 +22,77 @@ it('rejects an HTML homepage returned with HTTP 200 instead of caching it as a l
     status: 200,
   });
 });
+
+it('creates drafts and persists each allowed status transition', async () => {
+  const created = await createArticle({ title: '状态测试', channelId: 1, content: '正文' });
+  expect(created).toMatchObject({ status: 'draft' });
+
+  for (const status of ['published', 'archived', 'published'] as const) {
+    const updated = await updateArticle(created.id, { status });
+    expect(updated).toMatchObject({ status, createdAt: created.createdAt });
+    expect(await getArticle(created.id)).toMatchObject({ status });
+  }
+
+  const edited = await updateArticle(created.id, { title: '普通编辑' });
+  expect(edited).toMatchObject({ status: 'published' });
+});
+
+it('rejects illegal transitions without changing the article', async () => {
+  const created = await createArticle({ title: '不能跳过发布', channelId: 1, content: '正文' });
+  await expect(
+    updateArticle(created.id, { status: 'archived', title: '不能保存' }),
+  ).rejects.toMatchObject({
+    status: 409,
+    code: 'INVALID_STATUS_TRANSITION',
+  });
+  await expect(getArticle(created.id)).resolves.toEqual(created);
+});
+
+it('rejects deleting a published article until it is archived', async () => {
+  const article = makeArticle({ status: 'published' });
+  resetArticleStore([article]);
+
+  await expect(deleteArticle(article.id)).rejects.toMatchObject({
+    status: 409,
+    code: 'ARTICLE_IS_PUBLISHED',
+  });
+  await expect(getArticle(article.id)).resolves.toEqual(article);
+
+  await updateArticle(article.id, { status: 'archived' });
+  await expect(deleteArticle(article.id)).resolves.toBeUndefined();
+  await expect(getArticle(article.id)).rejects.toMatchObject({ status: 404 });
+});
+
+it('rejects unknown statuses and client-supplied creation statuses', async () => {
+  const input = { title: '标题', channelId: 1, content: '正文' };
+  const created = await createArticle(input);
+  const send = (method: string, path: string, body: unknown) =>
+    fetch(`http://localhost:5173/api/admin/articles${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  expect((await send('PATCH', `/${created.id}`, { status: 'pending' })).status).toBe(422);
+  expect((await send('POST', '', { ...input, status: 'published' })).status).toBe(422);
+  await expect(getArticle(created.id)).resolves.toEqual(created);
+});
+
+it.each([{}, { status: 'pending' }])(
+  'rejects missing or unknown response status %#',
+  async (override) => {
+    const { id, title, channelId, createdAt, updatedAt } = makeArticle();
+    const summary = { id, title, channelId, createdAt, updatedAt };
+    server.use(
+      http.get('*/api/admin/articles', () =>
+        HttpResponse.json({ items: [{ ...summary, ...override }], total: 1 }),
+      ),
+    );
+    await expect(getArticles(DEFAULT_ARTICLE_PARAMS)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  },
+);
 it.each([
   { items: null, total: 0 },
   { items: [], total: -1 },

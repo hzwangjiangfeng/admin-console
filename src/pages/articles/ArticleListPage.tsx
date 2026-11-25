@@ -2,13 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import { Alert, App, Button, Card, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
+import ArticleStatusTag from '../../components/articles/ArticleStatusTag';
+import { ARTICLE_STATUS_LABELS, ARTICLE_STATUS_NEXT } from '../../constants/articleStatuses';
 import { CHANNEL_OPTIONS, getChannelName } from '../../constants/channels';
-import { useDeleteArticleMutation } from '../../hooks/articles/useArticleMutations';
+import {
+  useDeleteArticleMutation,
+  useUpdateArticleMutation,
+} from '../../hooks/articles/useArticleMutations';
 import { useArticleListQuery } from '../../hooks/articles/useArticleQueries';
 import { normalizeArticleParams, serializeArticleParams } from '../../utils/articles/listParams';
 import { createArticleListState } from '../../utils/articles/navigation';
-import type { ArticleListItem, ArticleListParams } from '../../types/articles';
+import type { ArticleListItem, ArticleListParams, ArticleStatus } from '../../types/articles';
 import styles from './ArticlePages.module.css';
+
+const STATUS_OPTIONS = Object.entries(ARTICLE_STATUS_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
+const STATUS_ACTION_LABELS = { draft: '发布', published: '下架', archived: '重新发布' } as const;
+
 export default function ArticleListPage() {
   /* 列表查询：按 URL 中的筛选、排序和分页条件加载文章 */
   // 获取 URL 查询参数
@@ -26,7 +38,7 @@ export default function ArticleListPage() {
 
   /* URL -> 筛选表单 */
   // 创建筛选表单实例
-  const [form] = Form.useForm<{ keyword: string; channelId?: number }>();
+  const [form] = Form.useForm<{ keyword: string; channelId?: number; status?: ArticleStatus }>();
   // 依赖完整的查询串，URL 的其他查询参数（翻页或排序）发生变化时，也强制重新同步表单，用列表当前的筛选条件覆盖尚未提交的输入。比如：
   // 1. 当前列表按 React 筛选，输入框里显示 React
   // 2. 你把输入框改成 Vue，但还没点“查询”
@@ -35,8 +47,12 @@ export default function ArticleListPage() {
   const searchString = search.toString();
   // 当 URL 查询参数发生变化时，将最新的查询条件同步到 Ant Design 表单中，保证表单显示的内容与 URL 保持一致
   useEffect(() => {
-    form.setFieldsValue({ keyword: params.keyword, channelId: params.channelId ?? undefined });
-  }, [form, params.keyword, params.channelId, searchString]);
+    form.setFieldsValue({
+      keyword: params.keyword,
+      channelId: params.channelId ?? undefined,
+      status: params.status ?? undefined,
+    });
+  }, [form, params.keyword, params.channelId, params.status, searchString]);
 
   /* 筛选表单 -> URL */
   // 查询：更新文章列表的部分查询参数，并同步到 URL，驱动当前组件按新条件重新渲染
@@ -45,7 +61,7 @@ export default function ArticleListPage() {
   }
   // 重置：清空尚未提交的筛选输入，URL 查询参数全部恢复默认值，驱动当前组件按新条件重新渲染
   function resetParams() {
-    form.setFieldsValue({ keyword: '', channelId: undefined });
+    form.setFieldsValue({ keyword: '', channelId: undefined, status: undefined });
     setSearch(new URLSearchParams(), { flushSync: true });
   }
 
@@ -54,10 +70,11 @@ export default function ArticleListPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   // 删除文章的异步操作
   const deletion = useDeleteArticleMutation();
-  // 删除文章后，检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页。false 表示不需要检查，true 表示需要检查
+  // 检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页。false 表示不需要检查，true 表示需要检查
   const [repairEmptyPage, setRepairEmptyPage] = useState(false);
   // Ant Design 的 App.useApp() 提供了全局的 message，在 src/app/AppProviders.tsx 中已配置
   const { message } = App.useApp();
+
   // 删除确认操作
   async function confirmDelete() {
     if (deleteId === null || deletion.isPending) return;
@@ -70,7 +87,7 @@ export default function ArticleListPage() {
     setDeleteId(null);
     // 标记需要检查
     setRepairEmptyPage(true);
-    // 显示删除成功提示，void 明确表示不等待消息关闭（省略其实也是一样的效果）
+    // 显示成功提示，void 明确表示不等待消息关闭（省略其实也是一样的效果）
     void message.success('删除成功');
   }
   // 当 repairEmptyPage 为 true 时，检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页
@@ -81,6 +98,27 @@ export default function ArticleListPage() {
       setSearch(serializeArticleParams({ ...params, page: params.page - 1 }), { replace: true });
     else setRepairEmptyPage(false);
   }, [repairEmptyPage, query.isFetching, query.isError, query.data, params, setSearch]);
+
+  /* 更新状态 */
+  // 更新状态的异步操作
+  const statusUpdate = useUpdateArticleMutation();
+  // 更新状态操作
+  function changeArticleStatus(row: ArticleListItem) {
+    // 根据状态流转表提交目标状态，不修改标题、正文等其他字段
+    statusUpdate.mutate(
+      { id: row.id, input: { status: ARTICLE_STATUS_NEXT[row.status] } },
+      {
+        onSuccess: () => {
+          // 状态变更可能让文章不再符合当前筛选；等列表刷新后再检查是否需要退回上一页
+          if (params.status !== null) setRepairEmptyPage(true);
+          // 显示成功提示，void 明确表示不等待消息关闭（省略其实也是一样的效果）
+          void message.success(`${STATUS_ACTION_LABELS[row.status]}成功`);
+        },
+        // 请求失败时不更改列表里的状态，只提示失败原因
+        onError: (error) => void message.error(error.message),
+      },
+    );
+  }
 
   /* 定义表格列 */
   const columns: TableProps<ArticleListItem>['columns'] = [
@@ -98,6 +136,12 @@ export default function ArticleListPage() {
       dataIndex: 'channelId',
       width: 130,
       render: (id: number) => <Tag color="blue">{getChannelName(id)}</Tag>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 110,
+      render: (status: ArticleStatus) => <ArticleStatusTag status={status} />,
     },
     {
       title: '创建时间',
@@ -120,7 +164,7 @@ export default function ArticleListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 220,
+      width: 280,
       render: (_, row) => (
         <Space>
           <Link to={`/admin/articles/${row.id}`} state={from}>
@@ -131,15 +175,28 @@ export default function ArticleListPage() {
           </Link>
           <Button
             type="link"
-            danger
-            aria-label={`删除《${row.title}》`}
-            onClick={() => {
-              deletion.reset(); // 关掉上一次的错误提示
-              setDeleteId(row.id);
-            }}
+            className={styles.statusAction}
+            loading={statusUpdate.isPending && statusUpdate.variables?.id === row.id}
+            disabled={statusUpdate.isPending || query.isFetching}
+            onClick={() => changeArticleStatus(row)}
           >
-            删除
+            {STATUS_ACTION_LABELS[row.status]}
           </Button>
+          <span title={row.status === 'published' ? '请先下架再删除' : undefined}>
+            <Button
+              type="link"
+              danger
+              disabled={row.status === 'published'}
+              aria-description={row.status === 'published' ? '请先下架再删除' : undefined}
+              aria-label={`删除《${row.title}》`}
+              onClick={() => {
+                deletion.reset(); // 关掉上一次的错误提示
+                setDeleteId(row.id);
+              }}
+            >
+              删除
+            </Button>
+          </span>
         </Space>
       ),
     },
@@ -171,6 +228,7 @@ export default function ArticleListPage() {
             changeParams({
               keyword: (values.keyword ?? '').trim(),
               channelId: values.channelId ?? null,
+              status: values.status ?? null,
               page: 1,
             })
           }
@@ -185,6 +243,15 @@ export default function ArticleListPage() {
               placeholder="全部频道"
               allowClear
               style={{ minWidth: 150 }}
+            />
+          </Form.Item>
+          <Form.Item label="状态" name="status">
+            <Select
+              allowClear
+              virtual={false}
+              options={STATUS_OPTIONS}
+              placeholder="全部状态"
+              style={{ minWidth: 130 }}
             />
           </Form.Item>
           <Form.Item>
@@ -230,7 +297,7 @@ export default function ArticleListPage() {
           loading={query.isPending}
           locale={{ emptyText: '暂无文章' }}
           sortDirections={['ascend', 'descend', 'ascend']}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 1120 }}
           pagination={{
             current: params.page,
             pageSize: params.pageSize,

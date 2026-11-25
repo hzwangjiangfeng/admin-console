@@ -1,4 +1,6 @@
 import { http, HttpResponse } from 'msw';
+import { ARTICLE_STATUS_NEXT } from '../constants/articleStatuses';
+import type { Article } from '../types/articles';
 import { articleStore } from './data/articles';
 import { normalizeArticleParams, parseArticleId } from '../utils/articles/listParams';
 import { validateArticleInput } from '../utils/articles/validation';
@@ -12,7 +14,8 @@ export const articleHandlers = [
     const filtered = articleStore.articles.filter(
       (a) =>
         (!p.keyword || a.title.includes(p.keyword)) &&
-        (p.channelId === null || a.channelId === p.channelId),
+        (p.channelId === null || a.channelId === p.channelId) &&
+        (p.status === null || a.status === p.status),
     );
     const direction = p.sortOrder === 'desc' ? -1 : 1;
     filtered.sort(
@@ -21,10 +24,11 @@ export const articleHandlers = [
     const start = (p.page - 1) * p.pageSize;
     const items = filtered
       .slice(start, start + p.pageSize)
-      .map(({ id, title, channelId, createdAt, updatedAt }) => ({
+      .map(({ id, title, channelId, status, createdAt, updatedAt }) => ({
         id,
         title,
         channelId,
+        status,
         createdAt,
         updatedAt,
       }));
@@ -52,7 +56,13 @@ export const articleHandlers = [
         { status: 422 },
       );
     const now = new Date().toISOString();
-    const article = { ...result.values, id: articleStore.nextId++, createdAt: now, updatedAt: now };
+    const article: Article = {
+      ...result.values,
+      id: articleStore.nextId++,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+    };
     articleStore.articles.push(article);
     return HttpResponse.json(article, { status: 201 });
   }),
@@ -75,6 +85,14 @@ export const articleHandlers = [
         },
         { status: 422 },
       );
+    if (
+      result.values.status !== undefined &&
+      ARTICLE_STATUS_NEXT[article.status] !== result.values.status
+    )
+      return HttpResponse.json(
+        { code: 'INVALID_STATUS_TRANSITION', message: '当前状态不支持此操作' },
+        { status: 409 },
+      );
     Object.assign(article, result.values, { updatedAt: new Date().toISOString() });
     return HttpResponse.json(article);
   }),
@@ -83,6 +101,11 @@ export const articleHandlers = [
       (a) => a.id === parseArticleId(String(params.id)),
     );
     if (index === -1) return notFound();
+    if (articleStore.articles[index].status === 'published')
+      return HttpResponse.json(
+        { code: 'ARTICLE_IS_PUBLISHED', message: '已发布文章不能删除，请先下架' },
+        { status: 409 },
+      );
     articleStore.articles.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
   }),

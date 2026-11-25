@@ -1,4 +1,5 @@
 import type { Article, ArticleListItem, ArticleListResponse } from '../types/articles';
+import { isArticleStatus } from '../constants/articleStatuses';
 import { ApiError } from '../lib/apiError';
 
 type RecordValue = Record<string, unknown>;
@@ -14,6 +15,7 @@ function isArticleSummary(value: unknown): value is ArticleListItem {
     isPositiveInteger(value.id) &&
     typeof value.title === 'string' &&
     isPositiveInteger(value.channelId) &&
+    isArticleStatus(value.status) &&
     isTimestamp(value.createdAt) &&
     isTimestamp(value.updatedAt)
   );

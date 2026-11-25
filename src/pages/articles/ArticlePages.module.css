@@ -44,11 +44,19 @@
   font-weight: 500;
   color: #1d3558;
 }
+.statusAction {
+  inline-size: 7em;
+  justify-content: flex-start;
+  padding-inline-end: 0;
+}
 .notice {
   margin-bottom: 20px;
 }
 .formCard {
   max-width: 920px;
+}
+.editStatus {
+  margin-bottom: 16px;
 }
 .body {
   white-space: pre-wrap;

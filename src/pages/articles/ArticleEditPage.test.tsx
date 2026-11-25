@@ -6,6 +6,7 @@ import { server } from '../../test/server';
 import { makeArticle } from '../../test/fixtures';
 import { createAppQueryClient } from '../../lib/queryClient';
 import { articleKeys } from '../../hooks/articles/articleKeys';
+import { DEFAULT_ARTICLE_PARAMS } from '../../utils/articles/listParams';
 it('waits for a stale refresh then protects the draft from later query updates', async () => {
   let release!: (a: ReturnType<typeof makeArticle>) => void;
   const pending = new Promise<ReturnType<typeof makeArticle>>((resolve) => {
@@ -19,18 +20,23 @@ it('waits for a stale refresh then protects the draft from later query updates',
   const { user } = renderApp('/admin/articles/1/edit', { client });
   expect(screen.queryByRole('textbox', { name: '标题' })).not.toBeInTheDocument();
   await act(async () => {
-    release(makeArticle({ title: '最新标题' }));
+    release(makeArticle({ title: '最新标题', status: 'published' }));
     await pending;
   });
   const title = await screen.findByRole('textbox', { name: '标题' });
   expect(title).toHaveValue('最新标题');
+  expect(screen.getByText('已发布')).toBeVisible();
   await user.clear(title);
   await user.type(title, '尚未保存的草稿');
   server.use(
-    http.get('*/api/admin/articles/1', () => HttpResponse.json(makeArticle({ title: '后台修改' }))),
+    http.get('*/api/admin/articles/1', () =>
+      HttpResponse.json(makeArticle({ title: '后台修改', status: 'archived' })),
+    ),
   );
   await act(() => client.invalidateQueries({ queryKey: articleKeys.detail(1), exact: true }));
   expect(title).toHaveValue('尚未保存的草稿');
+  expect(await screen.findByText('已下架')).toBeVisible();
+  expect(screen.queryByText('已发布')).not.toBeInTheDocument();
 });
 it('does not offer stale editing after refresh failure and allows initialization retry', async () => {
   const client = createAppQueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -69,9 +75,11 @@ it('uses a fresh cache without another detail request', async () => {
 });
 it('keeps save successful if the returned list fails and retries only GET', async () => {
   let patches = 0;
+  let submittedInput: unknown;
   server.use(
-    http.patch('*/api/admin/articles/1', () => {
+    http.patch('*/api/admin/articles/1', async ({ request }) => {
       patches++;
+      submittedInput = await request.json();
       return HttpResponse.json(makeArticle({ title: '新标题' }));
     }),
     http.get('*/api/admin/articles', () =>
@@ -86,6 +94,7 @@ it('keeps save successful if the returned list fails and retries only GET', asyn
   expect(await screen.findByText('列表刷新失败')).toBeVisible();
   await user.click(screen.getByRole('button', { name: '重试' }));
   expect(patches).toBe(1);
+  expect(submittedInput).not.toHaveProperty('status');
 });
 it('preserves draft after PATCH validation failure and supports cancel to the original list', async () => {
   server.use(
@@ -130,11 +139,7 @@ it('ignores navigation from a late save after moving to another article draft', 
     }),
   );
   const client = createAppQueryClient({ defaultOptions: { queries: { retry: false } } });
-  const listKey = [
-    'articles',
-    'list',
-    { page: 1, pageSize: 10, keyword: '', channelId: null, sortBy: 'createdAt', sortOrder: 'desc' },
-  ] as const;
+  const listKey = articleKeys.list(DEFAULT_ARTICLE_PARAMS);
   client.setQueryData(listKey, { items: [], total: 0 });
   const { user, router } = renderApp('/admin/articles/1/edit', { client });
   await screen.findByRole('textbox', { name: '标题' });

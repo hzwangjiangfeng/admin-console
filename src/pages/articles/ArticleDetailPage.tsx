@@ -1,5 +1,6 @@
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, Button, Card, Skeleton, Tag } from 'antd';
+import ArticleStatusTag from '../../components/articles/ArticleStatusTag';
 import { parseArticleId } from '../../utils/articles/listParams';
 import { getArticleListReturnTo } from '../../utils/articles/navigation';
 import { useArticleDetailQuery } from '../../hooks/articles/useArticleQueries';
@@ -83,9 +84,10 @@ function ArticleDetailContent({ id }: { id: number }) {
         ) : (
           query.data && (
             <>
-              {/* 文章信息：所属频道和创建时间 */}
+              {/* 文章信息：所属频道、状态和创建时间 */}
               <div className={styles.detailMeta}>
                 <Tag color="blue">{getChannelName(query.data.channelId)}</Tag>
+                <ArticleStatusTag status={query.data.status} />
                 <span>
                   创建于 {new Date(query.data.createdAt).toLocaleString('zh-CN', { hour12: false })}
                 </span>

@@ -8,6 +8,7 @@ import type { ArticleFormValues } from '../../types/articles';
 import { useUpdateArticleMutation } from '../../hooks/articles/useArticleMutations';
 import { useSessionActive } from '../../hooks/useSessionActive';
 import ArticleForm from '../../components/articles/ArticleForm';
+import ArticleStatusTag from '../../components/articles/ArticleStatusTag';
 import styles from './ArticlePages.module.css';
 export default function ArticleEditPage() {
   const id = parseArticleId(useParams().id);
@@ -108,6 +109,12 @@ function ArticleEditSession({ id }: { id: number }) {
 
       {/* 表单卡片：承载文章编辑区域 */}
       <Card className={`${styles.panel} ${styles.formCard}`}>
+        {initialValues && detail.data && (
+          <div className={styles.editStatus}>
+            <span>文章状态：</span>
+            <ArticleStatusTag status={detail.data.status} />
+          </div>
+        )}
         {/* 初始化时显示骨架屏，取得初始值后显示可提交或取消的文章表单 */}
         {initialValues ? (
           <ArticleForm

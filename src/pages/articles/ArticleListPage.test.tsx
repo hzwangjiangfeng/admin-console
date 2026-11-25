@@ -8,6 +8,84 @@ import { articleKeys } from '../../hooks/articles/articleKeys';
 import { resetArticleStore } from '../../mocks/data/articles';
 import { makeArticle } from '../../test/fixtures';
 import { DEFAULT_ARTICLE_PARAMS } from '../../utils/articles/listParams';
+
+it('applies status only on query, preserves it on navigation, and clears it on reset', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '草稿文章' }),
+    makeArticle({ id: 2, title: '发布文章', status: 'published' }),
+    makeArticle({ id: 3, title: '下架文章', status: 'archived' }),
+  ]);
+  const { router, user } = renderApp('/admin/articles?page=2&pageSize=2');
+  await screen.findByText('草稿文章');
+  await user.click(screen.getByLabelText('状态'));
+  await user.click(await screen.findByText('已发布'));
+  const params = () => new URLSearchParams(router.state.location.search);
+  expect(params().get('status')).toBeNull();
+  expect(params().get('page')).toBe('2');
+
+  await user.click(screen.getByLabelText('查询'));
+  const row = (await screen.findByText('发布文章')).closest('tr')!;
+  expect(params().get('status')).toBe('published');
+  expect(params().get('page')).toBe('1');
+  expect(params().get('pageSize')).toBe('2');
+  expect(screen.queryByText('草稿文章')).not.toBeInTheDocument();
+  await user.click(within(row).getByText('详情'));
+  await screen.findByText('发布文章', { selector: 'h1' });
+  await act(() => router.navigate(-1));
+  const restored = (await screen.findByText('发布文章')).closest('tr')!;
+  expect(within(restored).getByText('已发布')).toBeVisible();
+  expect(params().get('status')).toBe('published');
+
+  await user.click(screen.getByLabelText('重置'));
+  expect(params().has('status')).toBe(false);
+  expect(screen.getByText('全部状态')).toBeVisible();
+});
+
+it('moves back one page when archiving the last result in a published filter', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '将下架的文章', status: 'published' }),
+    makeArticle({ id: 2, title: '保留文章', status: 'published' }),
+  ]);
+  const { user, router } = renderApp('/admin/articles?status=published&page=2&pageSize=1');
+  const row = (await screen.findByText('将下架的文章')).closest('tr')!;
+  expect(within(row).getByText('已发布')).toBeVisible();
+  await user.click(within(row).getByText('下架'));
+  expect(await screen.findByText('保留文章')).toBeVisible();
+  expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toMatchObject({
+    status: 'published',
+    page: '1',
+    pageSize: '1',
+  });
+  expect(screen.queryByText('将下架的文章')).not.toBeInTheDocument();
+});
+
+it('shows only the current status action and keeps the original status on failure', async () => {
+  resetArticleStore([makeArticle({ title: '待发布文章' })]);
+  server.use(
+    http.patch('*/api/admin/articles/1', () =>
+      HttpResponse.json({ code: 'REQUEST_ERROR', message: '无法发布' }, { status: 500 }),
+    ),
+  );
+  const { user } = renderApp('/admin/articles');
+  const row = (await screen.findByText('待发布文章')).closest('tr')!;
+  expect(within(row).queryByText(/^(下架|重新发布)$/)).not.toBeInTheDocument();
+  const publish = within(row).getByText('发布').closest('button');
+  await user.click(within(row).getByText('发布'));
+  expect(await screen.findByText('无法发布')).toBeVisible();
+  expect(within(row).getByText('草稿')).toBeVisible();
+  expect(publish).toBeEnabled();
+});
+
+it('shows the new status and action after republishing', async () => {
+  resetArticleStore([makeArticle({ title: '恢复文章', status: 'archived' })]);
+  const { user } = renderApp('/admin/articles');
+  const row = (await screen.findByText('恢复文章')).closest('tr')!;
+  expect(within(row).getByText('已下架')).toBeVisible();
+  await user.click(within(row).getByText('重新发布'));
+  expect(await within(row).findByText('已发布')).toBeVisible();
+  expect(within(row).getByText('下架')).toBeVisible();
+  expect(within(row).queryByText('重新发布')).not.toBeInTheDocument();
+});
 it('sorts by either time field in both directions and resets only the page', async () => {
   const { user, router } = renderApp(
     '/admin/articles?page=2&pageSize=5&keyword=React&channelId=1&sortOrder=desc',
@@ -84,6 +162,7 @@ it('clears drafts even at the default URL and reuses fresh default cache', async
         id: 1,
         title: '默认缓存',
         channelId: 1,
+        status: 'draft',
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-01T00:00:00Z',
       },
@@ -163,6 +242,7 @@ it('retains cached rows when a background refresh fails', async () => {
           id: 1,
           title: '缓存文章',
           channelId: 1,
+          status: 'draft',
           createdAt: '2026-01-01T00:00:00Z',
           updatedAt: '2026-01-01T00:00:00Z',
         },
@@ -181,6 +261,18 @@ it('retains cached rows when a background refresh fails', async () => {
   expect(await screen.findByText('后台刷新失败')).toBeVisible();
   expect(screen.getByText('缓存文章')).toBeVisible();
 });
+it('disables deletion for published articles until they are archived', async () => {
+  resetArticleStore([makeArticle({ title: '已发布文章', status: 'published' })]);
+  const { user } = renderApp('/admin/articles');
+  const deleteButton = await screen.findByLabelText('删除《已发布文章》');
+  expect(deleteButton).toBeDisabled();
+  await user.click(deleteButton);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+  await user.click(screen.getByText('下架'));
+  expect(await screen.findByText('已下架')).toBeVisible();
+  expect(screen.getByLabelText('删除《已发布文章》')).toBeEnabled();
+});
 it('cancels deletion without sending DELETE', async () => {
   let deletes = 0;
   server.use(
@@ -191,7 +283,7 @@ it('cancels deletion without sending DELETE', async () => {
   );
   const { user } = renderApp('/admin/articles');
   await user.click(await screen.findByLabelText('删除《React 实践 35》'));
-  await user.click(screen.getByRole('button', { name: '取消删除' }));
+  await user.click(screen.getByLabelText('取消删除'));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(deletes).toBe(0);
 });
@@ -221,7 +313,7 @@ it('keeps confirmation open after DELETE fails', async () => {
   );
   const { user } = renderApp('/admin/articles');
   await user.click(await screen.findByLabelText('删除《React 实践 35》'));
-  await user.click(screen.getByRole('button', { name: '确认删除' }));
+  await user.click(screen.getByLabelText('确认删除'));
   expect(await screen.findByText('无法删除')).toBeVisible();
   expect(screen.getByRole('dialog')).toBeVisible();
   expect(screen.getByText('React 实践 35')).toBeVisible();
@@ -241,11 +333,11 @@ it('closes confirmation after successful DELETE even when list refresh fails', a
       HttpResponse.json({ code: 'INTERNAL_ERROR', message: '删除后刷新失败' }, { status: 500 }),
     ),
   );
-  await user.click(screen.getByRole('button', { name: '确认删除' }));
+  await user.click(screen.getByLabelText('确认删除'));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   await waitFor(() => expect(screen.getByText('删除成功')).toBeVisible());
   expect(await screen.findByText('删除后刷新失败')).toBeVisible();
-  await user.click(screen.getByRole('button', { name: '重试' }));
+  await user.click(screen.getByLabelText('重试'));
   expect(deletes).toBe(1);
 });
 it('disables duplicate confirmation while DELETE is pending', async () => {
@@ -263,7 +355,7 @@ it('disables duplicate confirmation while DELETE is pending', async () => {
   );
   const { user } = renderApp('/admin/articles');
   await user.click(await screen.findByLabelText('删除《React 实践 35》'));
-  const confirm = screen.getByRole('button', { name: '确认删除' });
+  const confirm = screen.getByLabelText('确认删除');
   await user.click(confirm);
   expect(confirm).toBeDisabled();
   await user.click(confirm);
