@@ -1,5 +1,8 @@
 {
   "gitlens.hovers.currentLine.enabled": false,
+  "files.exclude": {
+    "**/*.test.tsx": true
+  },
   "[javascript][typescript][typescriptreact][html][css][json][jsonc][markdown]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true
