@@ -273,6 +273,206 @@ it('disables deletion for published articles until they are archived', async () 
   expect(await screen.findByText('已下架')).toBeVisible();
   expect(screen.getByLabelText('删除《已发布文章》')).toBeEnabled();
 });
+
+it('disables batch deletion when any selected article is published', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '草稿文章' }),
+    makeArticle({ id: 2, title: '发布文章', status: 'published' }),
+    makeArticle({ id: 3, title: '下架文章', status: 'archived' }),
+  ]);
+  const { user } = renderApp('/admin/articles');
+  await screen.findByText('草稿文章');
+  const draft = screen.queryByRole('checkbox', { name: '选择《草稿文章》' });
+  expect(draft).toBeInTheDocument();
+  const published = screen.getByRole('checkbox', { name: '选择《发布文章》' });
+  const archived = screen.getByRole('checkbox', { name: '选择《下架文章》' });
+  const all = screen.getByRole('checkbox', { name: '全选当前页' });
+
+  await user.click(draft!);
+  await user.click(archived);
+  const button = screen.getByRole('button', { name: '批量删除' });
+  expect(button).toBeEnabled();
+  expect(all).toBePartiallyChecked();
+
+  await user.click(published);
+  expect(all).toBeChecked();
+  expect(button).toBeDisabled();
+  expect(button).toHaveAccessibleDescription('选中项含已发布文章，请先下架');
+  await user.click(button);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+  await user.click(published);
+  expect(button).toBeEnabled();
+});
+
+it('selects the current page and clears selection on cancellation or navigation', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '另一页文章' }),
+    makeArticle({ id: 2, title: '当前页文章甲' }),
+    makeArticle({ id: 3, title: '当前页文章乙' }),
+  ]);
+  const { user, router } = renderApp('/admin/articles?page=1&pageSize=2');
+  await screen.findByText('当前页文章甲');
+  const all = screen.queryByRole('checkbox', { name: '全选当前页' });
+  expect(all).toBeInTheDocument();
+
+  await user.click(all!);
+  expect(all).toBeChecked();
+  expect(screen.getByText('已选择 2 项')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: '取消选择' }));
+  expect(all).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
+
+  await user.click(all!);
+  await act(() => router.navigate('/admin/articles?page=2&pageSize=2'));
+  expect(await screen.findByRole('checkbox', { name: '选择《另一页文章》' })).not.toBeChecked();
+  await act(() => router.navigate(-1));
+  expect(await screen.findByRole('checkbox', { name: '选择《当前页文章甲》' })).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
+});
+
+it.each(['becomes published', 'leaves the current page'])(
+  'blocks confirmation if a selected article %s while the dialog is open',
+  async (change) => {
+    const draft = makeArticle({ title: '草稿文章' });
+    const archived = makeArticle({ id: 2, title: '下架文章', status: 'archived' });
+    resetArticleStore([draft, archived]);
+    const { user, queryClient } = renderApp('/admin/articles');
+    await screen.findByText('草稿文章');
+    await user.click(screen.getByRole('checkbox', { name: '全选当前页' }));
+    await user.click(screen.getByRole('button', { name: '批量删除' }));
+    const confirm = screen.getByLabelText('确认删除');
+    expect(confirm).toBeEnabled();
+
+    const items =
+      change === 'becomes published' ? [{ ...draft, status: 'published' }, archived] : [archived];
+    act(() => {
+      queryClient.setQueryData(articleKeys.list(DEFAULT_ARTICLE_PARAMS), {
+        items,
+        total: items.length,
+      });
+    });
+    await screen.findByText('待删除文章已变更，请关闭弹窗后重新选择。');
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole('dialog')).toHaveTextContent('确定删除选中的 2 篇文章');
+  },
+);
+
+it('keeps only failed articles selected for a batch deletion retry', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '草稿文章' }),
+    makeArticle({ id: 2, title: '下架文章', status: 'archived' }),
+  ]);
+  server.use(
+    http.delete(
+      '*/api/admin/articles/2',
+      () => HttpResponse.json({ code: 'INTERNAL_ERROR', message: '无法删除' }, { status: 500 }),
+      { once: true },
+    ),
+  );
+  const { user } = renderApp('/admin/articles');
+  await screen.findByText('草稿文章');
+  const all = screen.queryByRole('checkbox', { name: '全选当前页' });
+  expect(all).toBeInTheDocument();
+  await user.click(all!);
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('确定删除选中的 2 篇文章吗？');
+  await user.click(screen.getByRole('button', { name: '确认删除' }));
+
+  expect(await screen.findByText('已删除 1 篇，1 篇失败')).toBeVisible();
+  await waitFor(() => expect(screen.queryByText('草稿文章')).not.toBeInTheDocument());
+  expect(screen.getByText('已选择 1 项')).toBeVisible();
+  expect(screen.getByRole('checkbox', { name: '选择《下架文章》' })).toBeChecked();
+
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('确定删除选中的 1 篇文章吗？');
+  await user.click(screen.getByRole('button', { name: '确认删除' }));
+  expect(await screen.findByText('已删除 1 篇文章')).toBeVisible();
+  await waitFor(() => expect(screen.queryByText('下架文章')).not.toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
+});
+
+it('returns to the first page after batch deleting the entire second page', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '保留文章甲' }),
+    makeArticle({ id: 2, title: '保留文章乙' }),
+    makeArticle({ id: 3, title: '待删除文章甲' }),
+    makeArticle({ id: 4, title: '待删除文章乙' }),
+  ]);
+  const { user, router } = renderApp(
+    '/admin/articles?page=2&pageSize=2&keyword=文章&channelId=1&status=draft&sortOrder=asc',
+  );
+  await screen.findByText('待删除文章甲');
+  expect(screen.getByText('待删除文章乙')).toBeVisible();
+  await user.click(screen.getByRole('checkbox', { name: '全选当前页' }));
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+  await user.click(screen.getByLabelText('确认删除'));
+
+  expect(await screen.findByText('保留文章甲')).toBeVisible();
+  expect(screen.getByText('保留文章乙')).toBeVisible();
+  expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toMatchObject({
+    page: '1',
+    pageSize: '2',
+    keyword: '文章',
+    channelId: '1',
+    status: 'draft',
+    sortOrder: 'asc',
+  });
+  expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
+});
+
+it('does not restore failed selections after browser history clears them', async () => {
+  resetArticleStore([makeArticle({ title: '草稿文章' })]);
+  let finishDeletion!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finishDeletion = resolve;
+  });
+  server.use(
+    http.delete('*/api/admin/articles/1', async () => {
+      await pending;
+      return HttpResponse.json({ code: 'INTERNAL_ERROR', message: '无法删除' }, { status: 500 });
+    }),
+  );
+  const { user, router } = renderApp('/admin/articles', {
+    entries: ['/admin/articles?sortOrder=asc', '/admin/articles'],
+    initialIndex: 1,
+  });
+  await screen.findByText('草稿文章');
+  await user.click(screen.getByLabelText('选择《草稿文章》'));
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+  await user.click(screen.getByLabelText('确认删除'));
+  expect(screen.getByLabelText('确认删除')).toBeDisabled();
+
+  await act(() => router.navigate(-1));
+  expect(await screen.findByLabelText('选择《草稿文章》')).not.toBeChecked();
+  finishDeletion();
+
+  expect(await screen.findByText('批量删除失败，请重试')).toBeVisible();
+  expect(screen.getByLabelText('选择《草稿文章》')).not.toBeChecked();
+});
+
+it('reports an unexpected batch mutation rejection and keeps the confirmation open', async () => {
+  resetArticleStore([makeArticle({ title: '草稿文章' })]);
+  const client = createAppQueryClient({
+    defaultOptions: {
+      mutations: {
+        onMutate: () => {
+          throw new Error('Unexpected batch mutation error');
+        },
+      },
+    },
+  });
+  const { user } = renderApp('/admin/articles', { client });
+  await screen.findByText('草稿文章');
+  await user.click(screen.getByLabelText('选择《草稿文章》'));
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+  await user.click(screen.getByLabelText('确认删除'));
+
+  expect(await screen.findByText('批量删除请求异常，请刷新列表后确认结果')).toBeVisible();
+  expect(screen.getByRole('dialog')).toHaveTextContent('批量删除文章');
+  expect(screen.getByLabelText('确认删除')).toBeEnabled();
+});
+
 it('cancels deletion without sending DELETE', async () => {
   let deletes = 0;
   server.use(

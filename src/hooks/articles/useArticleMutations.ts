@@ -34,3 +34,27 @@ export function useDeleteArticleMutation() {
     },
   });
 }
+
+export function useDeleteArticlesMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: number[]) => {
+      const deletedIds: number[] = [];
+      const failedIds: number[] = [];
+      for (const id of ids) {
+        try {
+          await deleteArticle(id);
+          deletedIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      return { deletedIds, failedIds };
+    },
+    onSuccess: ({ deletedIds }) => {
+      for (const id of deletedIds)
+        client.removeQueries({ queryKey: articleKeys.detail(id), exact: true });
+      void client.invalidateQueries({ queryKey: articleKeys.lists() }).catch(() => {});
+    },
+  });
+}

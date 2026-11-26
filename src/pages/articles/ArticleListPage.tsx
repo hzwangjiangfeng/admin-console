@@ -3,10 +3,15 @@ import { Link, useLocation, useSearchParams } from 'react-router';
 import { Alert, App, Button, Card, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import ArticleStatusTag from '../../components/articles/ArticleStatusTag';
-import { ARTICLE_STATUS_LABELS, ARTICLE_STATUS_NEXT } from '../../constants/articleStatuses';
+import {
+  ARTICLE_STATUS_NEXT,
+  STATUS_ACTION_LABELS,
+  STATUS_OPTIONS,
+} from '../../constants/articleStatuses';
 import { CHANNEL_OPTIONS, getChannelName } from '../../constants/channels';
 import {
   useDeleteArticleMutation,
+  useDeleteArticlesMutation,
   useUpdateArticleMutation,
 } from '../../hooks/articles/useArticleMutations';
 import { useArticleListQuery } from '../../hooks/articles/useArticleQueries';
@@ -14,12 +19,6 @@ import { normalizeArticleParams, serializeArticleParams } from '../../utils/arti
 import { createArticleListState } from '../../utils/articles/navigation';
 import type { ArticleListItem, ArticleListParams, ArticleStatus } from '../../types/articles';
 import styles from './ArticlePages.module.css';
-
-const STATUS_OPTIONS = Object.entries(ARTICLE_STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}));
-const STATUS_ACTION_LABELS = { draft: '发布', published: '下架', archived: '重新发布' } as const;
 
 export default function ArticleListPage() {
   /* 列表查询：按 URL 中的筛选、排序和分页条件加载文章 */
@@ -120,6 +119,70 @@ export default function ArticleListPage() {
     );
   }
 
+  /* 批量删除 */
+  // 批量选择的文章 ID 列表
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  // 批量删除弹窗的打开状态
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  // 当 URL 查询参数发生变化时，清空批量选择和关闭批量删除弹窗，避免用户在翻页或筛选后仍然保留之前的选择
+  useEffect(() => {
+    setSelectedIds([]);
+    setBatchDeleteOpen(false);
+  }, [searchString]);
+
+  // 获取当前页面的文章数据
+  const rows = query.data?.items ?? [];
+  // 用户勾选的文章中，仍然存在于当前页的文章 ID 列表
+  // 为什么需要 selectedIds 和 visibleSelectedIds 两个变量？因为使用了 TanStack Query，列表数据可能在用户没有进行任何操作的情况下发生变化
+  const visibleSelectedIds = rows
+    .filter((row) => selectedIds.includes(row.id))
+    .map((row) => row.id);
+  // 检查当前页的选中项中是否有已发布的文章
+  const hasPublishedSelection = rows.some(
+    (row) => selectedIds.includes(row.id) && row.status === 'published',
+  );
+
+  // 批量删除的异步操作
+  const batchDeletion = useDeleteArticlesMutation();
+  // 批量删除按钮禁用条件：没有选中项、选中项含已发布文章、列表正在加载、列表加载失败、状态更新或删除操作正在进行
+  const batchDeleteDisabled =
+    visibleSelectedIds.length === 0 ||
+    hasPublishedSelection ||
+    query.isFetching ||
+    query.isError ||
+    statusUpdate.isPending ||
+    deletion.isPending ||
+    batchDeletion.isPending;
+
+  // 勾选之后、确认删除之前，文章可能已经不在当前页了
+  const batchTargetsMissing = visibleSelectedIds.length !== selectedIds.length;
+  const confirmBatchDeleteDisabled = batchDeleteDisabled || batchTargetsMissing;
+
+  // 批量删除确认操作
+  async function confirmBatchDelete() {
+    if (!batchDeleteOpen || confirmBatchDeleteDisabled) return;
+
+    try {
+      const { deletedIds, failedIds } = await batchDeletion.mutateAsync(selectedIds);
+      setBatchDeleteOpen(false); // 关闭批量删除弹窗
+      if (deletedIds.length === 0) {
+        void message.error('批量删除失败，请重试');
+        return;
+      }
+
+      // 从当前选中的文章 ID 中移除删除成功的 ID，保留其他选中项
+      setSelectedIds((ids) => ids.filter((id) => !deletedIds.includes(id)));
+      // 检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页
+      setRepairEmptyPage(true);
+
+      if (failedIds.length > 0)
+        void message.warning(`已删除 ${deletedIds.length} 篇，${failedIds.length} 篇失败`);
+      else void message.success(`已删除 ${deletedIds.length} 篇文章`);
+    } catch {
+      void message.error('批量删除请求异常，请刷新列表后确认结果');
+    }
+  }
+
   /* 定义表格列 */
   const columns: TableProps<ArticleListItem>['columns'] = [
     {
@@ -177,7 +240,7 @@ export default function ArticleListPage() {
             type="link"
             className={styles.statusAction}
             loading={statusUpdate.isPending && statusUpdate.variables?.id === row.id}
-            disabled={statusUpdate.isPending || query.isFetching}
+            disabled={statusUpdate.isPending || query.isFetching || batchDeletion.isPending}
             onClick={() => changeArticleStatus(row)}
           >
             {STATUS_ACTION_LABELS[row.status]}
@@ -186,7 +249,7 @@ export default function ArticleListPage() {
             <Button
               type="link"
               danger
-              disabled={row.status === 'published'}
+              disabled={row.status === 'published' || batchDeletion.isPending}
               aria-description={row.status === 'published' ? '请先下架再删除' : undefined}
               aria-label={`删除《${row.title}》`}
               onClick={() => {
@@ -282,7 +345,7 @@ export default function ArticleListPage() {
         />
       )}
 
-      {/* 结果表格：展示文章、加载状态、排序和分页 */}
+      {/* 结果表格 */}
       <Card className={styles.panel}>
         <div className={styles.tableHeading}>
           <h2>全部文章</h2>
@@ -290,14 +353,60 @@ export default function ArticleListPage() {
             {query.isFetching && query.data ? '正在后台更新…' : '文章内容与发布记录'}
           </span>
         </div>
+        {/* 批量操作栏：当前页至少有一篇文章被勾选时才显示 */}
+        {visibleSelectedIds.length > 0 && (
+          <div className={styles.selectionBar}>
+            <div className={styles.selectionHeader}>
+              <span role="status" className={styles.selectionCount}>
+                已选择 {visibleSelectedIds.length} 项
+              </span>
+              <Button
+                type="link"
+                disabled={batchDeleteOpen || batchDeletion.isPending}
+                onClick={() => setSelectedIds([])}
+              >
+                取消选择
+              </Button>
+            </div>
+            <Space wrap>
+              <Button
+                danger
+                disabled={batchDeleteDisabled || batchDeleteOpen}
+                aria-describedby={hasPublishedSelection ? 'batch-delete-status-hint' : undefined}
+                onClick={() => {
+                  setSelectedIds(visibleSelectedIds); // 将当前页的有效勾选项带入弹窗
+                  setBatchDeleteOpen(true); // 打开批量删除弹窗
+                }}
+              >
+                批量删除
+              </Button>
+              {hasPublishedSelection && (
+                <span id="batch-delete-status-hint" className={styles.selectionHint}>
+                  选中项含已发布文章，请先下架
+                </span>
+              )}
+            </Space>
+          </div>
+        )}
         <Table<ArticleListItem>
           rowKey="id"
           columns={columns}
-          dataSource={query.data?.items ?? []}
+          dataSource={rows}
+          rowSelection={{
+            selectedRowKeys: visibleSelectedIds, // 配合 Table 中的 rowKey="id"，控制哪些行被选中
+            onChange: (_, selected) => setSelectedIds(selected.map((row) => row.id)), // 用户勾选或取消勾选时，保存选中的文章 ID
+            getTitleCheckboxProps: () => ({ 'aria-label': '全选当前页' }), // 配置表头全选复选框的无障碍名称
+            getCheckboxProps: (row) => ({
+              // 配置每一行的复选框，Ant Design 会针对每一行文章调用这个函数，并将对应的文章对象传给 row
+              'aria-label': `选择《${row.title}》`,
+              // 确认删除或执行删除期间，禁止修改选择
+              disabled: batchDeleteOpen || batchDeletion.isPending,
+            }),
+          }}
           loading={query.isPending}
           locale={{ emptyText: '暂无文章' }}
           sortDirections={['ascend', 'descend', 'ascend']}
-          scroll={{ x: 1120 }}
+          scroll={{ x: 1160 }}
           pagination={{
             current: params.page,
             pageSize: params.pageSize,
@@ -343,6 +452,30 @@ export default function ArticleListPage() {
       >
         <p>确定删除这篇文章吗？此操作无法撤销。</p>
         {deletion.isError && <Alert type="error" title={deletion.error.message} />}
+      </Modal>
+      <Modal
+        title="批量删除文章"
+        open={batchDeleteOpen}
+        onOk={() => void confirmBatchDelete()}
+        onCancel={() => {
+          if (!batchDeletion.isPending) setBatchDeleteOpen(false);
+        }}
+        okText="确认删除"
+        cancelText="取消删除"
+        confirmLoading={batchDeletion.isPending}
+        okButtonProps={{
+          danger: true,
+          disabled: confirmBatchDeleteDisabled,
+          'aria-label': '确认删除',
+        }}
+        cancelButtonProps={{ disabled: batchDeletion.isPending, 'aria-label': '取消删除' }}
+        closable={!batchDeletion.isPending}
+        mask={{ closable: !batchDeletion.isPending }}
+      >
+        <p>确定删除选中的 {selectedIds.length} 篇文章吗？此操作无法撤销。</p>
+        {batchDeleteOpen && (hasPublishedSelection || batchTargetsMissing) && (
+          <Alert type="warning" title="待删除文章已变更，请关闭弹窗后重新选择。" />
+        )}
       </Modal>
     </section>
   );
