@@ -1,13 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
-import { Alert, App, Button, Card, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+} from 'antd';
 import type { TableProps } from 'antd';
 import ArticleStatusTag from '../../components/articles/ArticleStatusTag';
-import { ARTICLE_STATUS_LABELS, ARTICLE_STATUS_NEXT } from '../../constants/articleStatuses';
+import {
+  ARTICLE_STATUS_NEXT,
+  STATUS_ACTION_LABELS,
+  STATUS_OPTIONS,
+} from '../../constants/articleStatuses';
 import { CHANNEL_OPTIONS, getChannelName } from '../../constants/channels';
 import {
   useDeleteArticleMutation,
+  useDeleteArticlesMutation,
   useUpdateArticleMutation,
+  useUpdateArticlesStatusMutation,
 } from '../../hooks/articles/useArticleMutations';
 import { useArticleListQuery } from '../../hooks/articles/useArticleQueries';
 import { normalizeArticleParams, serializeArticleParams } from '../../utils/articles/listParams';
@@ -15,11 +34,14 @@ import { createArticleListState } from '../../utils/articles/navigation';
 import type { ArticleListItem, ArticleListParams, ArticleStatus } from '../../types/articles';
 import styles from './ArticlePages.module.css';
 
-const STATUS_OPTIONS = Object.entries(ARTICLE_STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}));
-const STATUS_ACTION_LABELS = { draft: '发布', published: '下架', archived: '重新发布' } as const;
+const BATCH_ACTIONS = ['publish', 'archive', 'delete'] as const;
+type BatchAction = (typeof BATCH_ACTIONS)[number];
+const BATCH_ACTION_TEXT = {
+  publish: { label: '发布', hint: '仅支持草稿和已下架文章' },
+  archive: { label: '下架', hint: '仅支持已发布文章' },
+  delete: { label: '删除', hint: '已发布文章请先下架' },
+} satisfies Record<BatchAction, { label: string; hint: string }>;
+const BATCH_TARGET_STATUS = { publish: 'published', archive: 'archived' } as const;
 
 export default function ArticleListPage() {
   /* 列表查询：按 URL 中的筛选、排序和分页条件加载文章 */
@@ -70,8 +92,8 @@ export default function ArticleListPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   // 删除文章的异步操作
   const deletion = useDeleteArticleMutation();
-  // 检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页。false 表示不需要检查，true 表示需要检查
-  const [repairEmptyPage, setRepairEmptyPage] = useState(false);
+  // 记录待修正页码的列表查询字符串，null 表示没有待处理的分页修正
+  const [repairSearch, setRepairSearch] = useState<string | null>(null);
   // Ant Design 的 App.useApp() 提供了全局的 message，在 src/app/AppProviders.tsx 中已配置
   const { message } = App.useApp();
 
@@ -85,19 +107,32 @@ export default function ArticleListPage() {
     }
     // 关闭删除确认弹窗
     setDeleteId(null);
-    // 标记需要检查
-    setRepairEmptyPage(true);
+    // 等列表刷新完成后，检查一下页码是否需要修正
+    setRepairSearch(searchString);
     // 显示成功提示，void 明确表示不等待消息关闭（省略其实也是一样的效果）
     void message.success('删除成功');
   }
-  // 当 repairEmptyPage 为 true 时，检查当前页是否为空，如果为空且不是第一页，则自动跳转到前一页
+  // 在删除文章或修改文章状态后，等待列表数据刷新，再判断当前页码是否仍然有效。如果当前页码超出了最大页码，就自动跳转到最后一个有效页
   useEffect(() => {
-    if (!repairEmptyPage || query.isFetching || query.isError || !query.data) return;
-    // 当前页为空且不是第一页时，自动返回上一页；否则结束分页修正
-    if (query.data.items.length === 0 && params.page > 1)
-      setSearch(serializeArticleParams({ ...params, page: params.page - 1 }), { replace: true });
-    else setRepairEmptyPage(false);
-  }, [repairEmptyPage, query.isFetching, query.isError, query.data, params, setSearch]);
+    // 判断是否存在分页修正任务
+    if (repairSearch === null) return;
+    // 判断用户是否已经切换列表，由于删除、发布、下架都是异步操作，在请求完成之前，用户可能已经通过浏览器前进或后退切换了列表
+    if (repairSearch !== searchString) {
+      setRepairSearch(null);
+      return;
+    }
+    // 等待列表数据可用，这里直接 return，没有清空 repairSearch，因此分页修正任务依然存在
+    // 当 query.isFetching、query.isError 或 query.data 发生变化时，Effect 会再次执行
+    if (query.isFetching || query.isError || !query.data) return;
+    // 计算最后一个有效页码
+    const lastPage = Math.max(1, Math.ceil(query.data.total / params.pageSize));
+    // 清空分页修正任务，无论最终是否需要跳转，本次检查都已经完成
+    setRepairSearch(null);
+    // 只有当前页码超过最大有效页码时，才需要修正
+    if (params.page > lastPage) {
+      setSearch(serializeArticleParams({ ...params, page: lastPage }), { replace: true });
+    }
+  }, [repairSearch, query.isFetching, query.isError, query.data, params, searchString, setSearch]);
 
   /* 更新状态 */
   // 更新状态的异步操作
@@ -109,8 +144,8 @@ export default function ArticleListPage() {
       { id: row.id, input: { status: ARTICLE_STATUS_NEXT[row.status] } },
       {
         onSuccess: () => {
-          // 状态变更可能让文章不再符合当前筛选；等列表刷新后再检查是否需要退回上一页
-          if (params.status !== null) setRepairEmptyPage(true);
+          // 状态变更可能让文章离开当前筛选结果，等列表刷新后再检查页码
+          if (params.status !== null) setRepairSearch(searchString);
           // 显示成功提示，void 明确表示不等待消息关闭（省略其实也是一样的效果）
           void message.success(`${STATUS_ACTION_LABELS[row.status]}成功`);
         },
@@ -118,6 +153,105 @@ export default function ArticleListPage() {
         onError: (error) => void message.error(error.message),
       },
     );
+  }
+
+  /* 批量操作 */
+  // 记录用户选中了哪些文章
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  // 记录当前准备执行什么操作，null 表示关闭弹窗
+  const [batchAction, setBatchAction] = useState<BatchAction | null>(null);
+  // 获取当前操作文案
+  const batchActionLabel = batchAction === null ? '' : BATCH_ACTION_TEXT[batchAction].label;
+  // 当 URL 查询参数发生变化时，清空批量选择并关闭弹窗，避免翻页或筛选后保留之前的选择
+  useEffect(() => {
+    setSelectedIds([]);
+    setBatchAction(null);
+  }, [searchString]);
+  // 获取当前页面的文章数据
+  const rows = query.data?.items ?? [];
+  // 列表可能在后台刷新，批量操作以当前页仍然存在的选中项为准
+  const selectedRows = rows.filter((row) => selectedIds.includes(row.id));
+  // 用户勾选的文章中，仍然存在于当前页的文章 ID 列表
+  // 为什么需要 selectedIds 和 visibleSelectedIds 两个变量？因为使用了 TanStack Query，列表数据可能在用户没有进行任何操作的情况下发生变化
+  const visibleSelectedIds = selectedRows.map((row) => row.id);
+  // 判断允许执行哪些批量操作
+  const batchEligible = {
+    delete: selectedRows.every((row) => row.status !== 'published'),
+    publish: selectedRows.every(
+      (row) => ARTICLE_STATUS_NEXT[row.status] === BATCH_TARGET_STATUS.publish,
+    ),
+    archive: selectedRows.every(
+      (row) => ARTICLE_STATUS_NEXT[row.status] === BATCH_TARGET_STATUS.archive,
+    ),
+  };
+
+  // 批量删除的异步操作
+  const batchDeletion = useDeleteArticlesMutation();
+  // 批量状态更新的异步操作
+  const batchStatusUpdate = useUpdateArticlesStatusMutation();
+
+  // 是否有批量请求正在执行
+  const batchPending = batchDeletion.isPending || batchStatusUpdate.isPending;
+  // 所有批量操作共用的禁用条件
+  const batchActionDisabled =
+    visibleSelectedIds.length === 0 ||
+    query.isFetching ||
+    query.isError ||
+    statusUpdate.isPending ||
+    deletion.isPending ||
+    batchPending;
+
+  // 处理用户打开确认弹窗后，列表数据又发生变化的情况
+  // 场景一：文章离开当前页
+  // 场景二：文章状态发生变化
+  const batchTargetsChanged =
+    batchAction !== null &&
+    (visibleSelectedIds.length !== selectedIds.length || !batchEligible[batchAction]);
+  // 最终确认按钮状态
+  const confirmBatchActionDisabled = batchActionDisabled || batchTargetsChanged;
+
+  // 打开批量操作弹窗
+  function openBatchAction(action: BatchAction) {
+    // 将当前页的有效勾选项带入弹窗
+    setSelectedIds(visibleSelectedIds);
+    // 记录要执行的操作，同时打开对应的确认弹窗
+    setBatchAction(action);
+  }
+
+  async function confirmBatchAction() {
+    if (batchAction === null || confirmBatchActionDisabled) return;
+
+    try {
+      const result =
+        batchAction === 'delete'
+          ? await batchDeletion.mutateAsync(selectedIds)
+          : await batchStatusUpdate.mutateAsync({
+              ids: selectedIds,
+              status: BATCH_TARGET_STATUS[batchAction],
+            });
+      const succeededIds = 'deletedIds' in result ? result.deletedIds : result.updatedIds;
+      // 关闭批量确认弹窗
+      setBatchAction(null);
+      if (succeededIds.length === 0) {
+        void message.error(`批量${batchActionLabel}失败，请重试`);
+        return;
+      }
+
+      // 从当前选中的文章 ID 中移除删除成功的 ID，保留其他选中项
+      setSelectedIds((ids) => ids.filter((id) => !succeededIds.includes(id)));
+      // 批量删除或存在状态筛选时的批量发布/下架，可能减少当前列表的总条数，因此需要在列表刷新后检查并修正页码
+      if (batchAction === 'delete' || params.status !== null) {
+        setRepairSearch(searchString);
+      }
+
+      if (result.failedIds.length > 0)
+        void message.warning(
+          `已${batchActionLabel} ${succeededIds.length} 篇，${result.failedIds.length} 篇失败`,
+        );
+      else void message.success(`已${batchActionLabel} ${succeededIds.length} 篇文章`);
+    } catch {
+      void message.error(`批量${batchActionLabel}请求异常，请刷新列表后确认结果`);
+    }
   }
 
   /* 定义表格列 */
@@ -177,7 +311,7 @@ export default function ArticleListPage() {
             type="link"
             className={styles.statusAction}
             loading={statusUpdate.isPending && statusUpdate.variables?.id === row.id}
-            disabled={statusUpdate.isPending || query.isFetching}
+            disabled={statusUpdate.isPending || query.isFetching || batchPending}
             onClick={() => changeArticleStatus(row)}
           >
             {STATUS_ACTION_LABELS[row.status]}
@@ -186,7 +320,7 @@ export default function ArticleListPage() {
             <Button
               type="link"
               danger
-              disabled={row.status === 'published'}
+              disabled={row.status === 'published' || batchPending}
               aria-description={row.status === 'published' ? '请先下架再删除' : undefined}
               aria-label={`删除《${row.title}》`}
               onClick={() => {
@@ -282,7 +416,7 @@ export default function ArticleListPage() {
         />
       )}
 
-      {/* 结果表格：展示文章、加载状态、排序和分页 */}
+      {/* 结果表格 */}
       <Card className={styles.panel}>
         <div className={styles.tableHeading}>
           <h2>全部文章</h2>
@@ -290,14 +424,75 @@ export default function ArticleListPage() {
             {query.isFetching && query.data ? '正在后台更新…' : '文章内容与发布记录'}
           </span>
         </div>
+        {/* 批量操作栏：当前页至少有一篇文章被勾选时才显示 */}
+        {visibleSelectedIds.length > 0 && (
+          <div className={styles.selectionBar}>
+            <div className={styles.selectionHeader}>
+              <span role="status" className={styles.selectionCount}>
+                已选择 {visibleSelectedIds.length} 项
+              </span>
+              <Button
+                type="link"
+                disabled={batchAction !== null || batchPending}
+                onClick={() => setSelectedIds([])}
+              >
+                取消选择
+              </Button>
+            </div>
+            <Space wrap>
+              {BATCH_ACTIONS.map((action) => {
+                const label = `批量${BATCH_ACTION_TEXT[action].label}`;
+                const hint = batchEligible[action] ? undefined : BATCH_ACTION_TEXT[action].hint;
+                return (
+                  <Tooltip
+                    key={action}
+                    title={hint}
+                    trigger={hint ? ['hover', 'focus'] : []}
+                    destroyOnHidden
+                  >
+                    {/* 禁用按钮由外层元素接收悬停和键盘焦点。 */}
+                    <span
+                      className={hint ? styles.batchActionTooltip : undefined}
+                      tabIndex={hint ? 0 : undefined}
+                      role={hint ? 'group' : undefined}
+                      aria-label={hint ? label : undefined}
+                      aria-description={hint}
+                    >
+                      <Button
+                        danger={action === 'delete'}
+                        disabled={
+                          batchActionDisabled || batchAction !== null || !batchEligible[action]
+                        }
+                        aria-description={hint}
+                        onClick={() => openBatchAction(action)}
+                      >
+                        {label}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                );
+              })}
+            </Space>
+          </div>
+        )}
         <Table<ArticleListItem>
           rowKey="id"
           columns={columns}
-          dataSource={query.data?.items ?? []}
+          dataSource={rows}
+          rowSelection={{
+            selectedRowKeys: visibleSelectedIds, // 配合 Table 中的 rowKey="id"，控制哪些行被选中
+            onChange: (_, selected) => setSelectedIds(selected.map((row) => row.id)), // 用户勾选或取消勾选时，保存选中的文章 ID
+            getTitleCheckboxProps: () => ({ 'aria-label': '全选当前页' }), // 配置表头全选复选框的无障碍名称
+            getCheckboxProps: (row) => ({
+              'aria-label': `选择《${row.title}》`,
+              // 确认或执行批量操作期间固定选择，避免目标变化
+              disabled: batchAction !== null || batchPending,
+            }),
+          }}
           loading={query.isPending}
           locale={{ emptyText: '暂无文章' }}
           sortDirections={['ascend', 'descend', 'ascend']}
-          scroll={{ x: 1120 }}
+          scroll={{ x: 1160 }}
           pagination={{
             current: params.page,
             pageSize: params.pageSize,
@@ -343,6 +538,33 @@ export default function ArticleListPage() {
       >
         <p>确定删除这篇文章吗？此操作无法撤销。</p>
         {deletion.isError && <Alert type="error" title={deletion.error.message} />}
+      </Modal>
+      <Modal
+        title={`批量${batchActionLabel}文章`}
+        open={batchAction !== null}
+        onOk={() => void confirmBatchAction()}
+        onCancel={() => {
+          if (!batchPending) setBatchAction(null);
+        }}
+        okText={`确认${batchActionLabel}`}
+        cancelText={`取消${batchActionLabel}`}
+        confirmLoading={batchPending}
+        okButtonProps={{
+          danger: batchAction === 'delete',
+          disabled: confirmBatchActionDisabled,
+          'aria-label': `确认${batchActionLabel}`,
+        }}
+        cancelButtonProps={{ disabled: batchPending, 'aria-label': `取消${batchActionLabel}` }}
+        closable={!batchPending}
+        mask={{ closable: !batchPending }}
+      >
+        <p>
+          确定{batchActionLabel}选中的 {selectedIds.length} 篇文章吗？
+          {batchAction === 'delete' && '此操作无法撤销。'}
+        </p>
+        {!batchPending && batchTargetsChanged && (
+          <Alert type="warning" title={`待${batchActionLabel}文章已变更，请关闭弹窗后重新选择。`} />
+        )}
       </Modal>
     </section>
   );

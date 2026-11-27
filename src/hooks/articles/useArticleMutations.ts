@@ -34,3 +34,54 @@ export function useDeleteArticleMutation() {
     },
   });
 }
+
+export function useDeleteArticlesMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: number[]) => {
+      const deletedIds: number[] = [];
+      const failedIds: number[] = [];
+      for (const id of ids) {
+        try {
+          await deleteArticle(id);
+          deletedIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      return { deletedIds, failedIds };
+    },
+    onSuccess: ({ deletedIds }) => {
+      for (const id of deletedIds)
+        client.removeQueries({ queryKey: articleKeys.detail(id), exact: true });
+      void client.invalidateQueries({ queryKey: articleKeys.lists() }).catch(() => {});
+    },
+  });
+}
+
+export function useUpdateArticlesStatusMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, status }: { ids: number[]; status: 'published' | 'archived' }) => {
+      const updatedIds: number[] = [];
+      const failedIds: number[] = [];
+      for (const id of ids) {
+        try {
+          await updateArticle(id, { status });
+          updatedIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      return { updatedIds, failedIds };
+    },
+    onSuccess: ({ updatedIds }) => {
+      for (const id of updatedIds) {
+        void client
+          .invalidateQueries({ queryKey: articleKeys.detail(id), exact: true })
+          .catch(() => {});
+      }
+      void client.invalidateQueries({ queryKey: articleKeys.lists() }).catch(() => {});
+    },
+  });
+}

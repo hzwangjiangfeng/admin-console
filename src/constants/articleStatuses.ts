@@ -14,6 +14,11 @@ export const ARTICLE_STATUS_NEXT: Record<ArticleStatus, ArticleStatus> = {
   published: 'archived',
   archived: 'published',
 };
+export const STATUS_ACTION_LABELS: Record<ArticleStatus, string> = {
+  draft: '发布',
+  published: '下架',
+  archived: '重新发布',
+};
 export function isArticleStatus(value: unknown): value is ArticleStatus {
   return typeof value === 'string' && Object.hasOwn(ARTICLE_STATUS_LABELS, value);
 }

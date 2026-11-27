@@ -63,6 +63,46 @@ test('delete the final page and recover one page while preserving page size', as
   await expect(page).toHaveURL(/pageSize=1/);
   await expect(page.getByRole('link', { name: 'Vue 笔记 02', exact: true })).toBeVisible();
 });
+test('batch publishes draft and archived articles, then takes them down', async ({ page }) => {
+  await page.goto('/admin/articles?sortOrder=asc');
+  const first = page.getByRole('row').filter({ hasText: 'React 实践 01' });
+  const second = page.getByRole('row').filter({ hasText: 'React 实践 07' });
+  await expect(first.getByText('草稿', { exact: true })).toBeVisible();
+  await expect(second.getByText('已下架', { exact: true })).toBeVisible();
+  await first.getByRole('checkbox').check();
+  await second.getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: '批量下架', exact: true })).toBeDisabled();
+  const publish = page.getByRole('button', { name: '批量发布', exact: true });
+  const archiveHintTrigger = page.getByRole('group', { name: '批量下架', exact: true });
+  const archiveHint = page.getByRole('tooltip').filter({ hasText: '仅支持已发布文章' });
+  await expect(archiveHint).toBeHidden();
+  await archiveHintTrigger.hover();
+  await expect(archiveHint).toBeVisible();
+  await publish.hover();
+  await expect(archiveHint).toBeHidden();
+  await publish.focus();
+  await page.keyboard.press('Tab');
+  await expect(archiveHintTrigger).toBeFocused();
+  await expect(archiveHint).toBeVisible();
+  await page.keyboard.press('Shift+Tab');
+  await expect(archiveHint).toBeHidden();
+  await publish.click();
+  const publishDialog = page.getByRole('dialog', { name: '批量发布文章' });
+  await expect(publishDialog).toContainText('确定发布选中的 2 篇文章吗？');
+  await publishDialog.getByRole('button', { name: '确认发布', exact: true }).click();
+  await expect(first.getByText('已发布', { exact: true })).toBeVisible();
+  await expect(second.getByText('已发布', { exact: true })).toBeVisible();
+
+  await first.getByRole('checkbox').check();
+  await second.getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: '批量发布', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '批量下架', exact: true }).click();
+  const archiveDialog = page.getByRole('dialog', { name: '批量下架文章' });
+  await expect(archiveDialog).toContainText('确定下架选中的 2 篇文章吗？');
+  await archiveDialog.getByRole('button', { name: '确认下架', exact: true }).click();
+  await expect(first.getByText('已下架', { exact: true })).toBeVisible();
+  await expect(second.getByText('已下架', { exact: true })).toBeVisible();
+});
 test('direct detail and editor links fall back to the default list', async ({ page }) => {
   await page.goto('/admin/articles/1');
   await page.getByRole('button', { name: '返回列表', exact: true }).click();
