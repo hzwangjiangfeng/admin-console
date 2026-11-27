@@ -274,7 +274,7 @@ it('disables deletion for published articles until they are archived', async () 
   expect(screen.getByLabelText('删除《已发布文章》')).toBeEnabled();
 });
 
-it('disables batch deletion when any selected article is published', async () => {
+it('enables each batch action only when all selected articles are eligible', async () => {
   resetArticleStore([
     makeArticle({ id: 1, title: '草稿文章' }),
     makeArticle({ id: 2, title: '发布文章', status: 'published' }),
@@ -289,20 +289,40 @@ it('disables batch deletion when any selected article is published', async () =>
   const all = screen.getByRole('checkbox', { name: '全选当前页' });
 
   await user.click(draft!);
+  const publishButton = screen.getByText('批量发布').closest('button')!;
+  const archiveButton = screen.getByText('批量下架').closest('button')!;
+  const deleteButton = screen.getByText('批量删除').closest('button')!;
+  const disabledActions = () => ({
+    publish: publishButton.hasAttribute('disabled'),
+    archive: archiveButton.hasAttribute('disabled'),
+    delete: deleteButton.hasAttribute('disabled'),
+  });
+  const publishHint = '仅支持草稿和已下架文章';
+  const archiveHint = '仅支持已发布文章';
+  expect(disabledActions()).toEqual({ publish: false, archive: true, delete: false });
+
   await user.click(archived);
-  const button = screen.getByRole('button', { name: '批量删除' });
-  expect(button).toBeEnabled();
+  expect(disabledActions()).toEqual({ publish: false, archive: true, delete: false });
+  expect(screen.queryByText(publishHint)).not.toBeInTheDocument();
+  expect(screen.queryByText(archiveHint)).not.toBeInTheDocument();
+  expect(archiveButton).toHaveAccessibleDescription(archiveHint);
   expect(all).toBePartiallyChecked();
 
+  await user.click(draft!);
+  expect(disabledActions()).toEqual({ publish: false, archive: true, delete: false });
+
+  await user.click(draft!);
   await user.click(published);
   expect(all).toBeChecked();
-  expect(button).toBeDisabled();
-  expect(button).toHaveAccessibleDescription('选中项含已发布文章，请先下架');
-  await user.click(button);
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(disabledActions()).toEqual({ publish: true, archive: true, delete: true });
+  expect(deleteButton).toHaveAccessibleDescription('已发布文章请先下架');
 
-  await user.click(published);
-  expect(button).toBeEnabled();
+  await user.click(draft!);
+  await user.click(archived);
+  expect(disabledActions()).toEqual({ publish: true, archive: false, delete: true });
+  expect(screen.queryByText(publishHint)).not.toBeInTheDocument();
+  expect(publishButton).toHaveAccessibleDescription(publishHint);
+  expect(screen.queryByText(archiveHint)).not.toBeInTheDocument();
 });
 
 it('selects the current page and clears selection on cancellation or navigation', async () => {
@@ -331,17 +351,21 @@ it('selects the current page and clears selection on cancellation or navigation'
   expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
 });
 
-it.each(['becomes published', 'leaves the current page'])(
-  'blocks confirmation if a selected article %s while the dialog is open',
-  async (change) => {
+it.each([
+  { action: '删除', change: 'becomes published' },
+  { action: '删除', change: 'leaves the current page' },
+  { action: '发布', change: 'becomes published' },
+])(
+  'blocks the batch $action confirmation if a selected article $change while the dialog is open',
+  async ({ action, change }) => {
     const draft = makeArticle({ title: '草稿文章' });
     const archived = makeArticle({ id: 2, title: '下架文章', status: 'archived' });
     resetArticleStore([draft, archived]);
     const { user, queryClient } = renderApp('/admin/articles');
     await screen.findByText('草稿文章');
     await user.click(screen.getByRole('checkbox', { name: '全选当前页' }));
-    await user.click(screen.getByRole('button', { name: '批量删除' }));
-    const confirm = screen.getByLabelText('确认删除');
+    await user.click(screen.getByRole('button', { name: `批量${action}` }));
+    const confirm = screen.getByLabelText(`确认${action}`);
     expect(confirm).toBeEnabled();
 
     const items =
@@ -352,11 +376,107 @@ it.each(['becomes published', 'leaves the current page'])(
         total: items.length,
       });
     });
-    await screen.findByText('待删除文章已变更，请关闭弹窗后重新选择。');
+    await screen.findByText(`待${action}文章已变更，请关闭弹窗后重新选择。`);
     expect(confirm).toBeDisabled();
-    expect(screen.getByRole('dialog')).toHaveTextContent('确定删除选中的 2 篇文章');
+    expect(screen.getByRole('dialog')).toHaveTextContent(`确定${action}选中的 2 篇文章`);
   },
 );
+
+it('keeps writes locked without showing a target change warning during a batch publish', async () => {
+  const draft = makeArticle({ title: '草稿文章' });
+  resetArticleStore([draft]);
+  let finishPublish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finishPublish = resolve;
+  });
+  server.use(
+    http.patch('*/api/admin/articles/1', async () => {
+      await pending;
+      return HttpResponse.json({ code: 'INTERNAL_ERROR', message: '无法发布' }, { status: 500 });
+    }),
+  );
+  const { user, queryClient } = renderApp('/admin/articles');
+  const row = (await screen.findByText('草稿文章')).closest('tr')!;
+  const checkbox = within(row).getByLabelText('选择《草稿文章》');
+  const singlePublish = within(row).getByText('发布', { exact: true }).closest('button');
+  const singleDelete = within(row).getByLabelText('删除《草稿文章》');
+  await user.click(checkbox);
+  await user.click(screen.getByText('批量发布').closest('button')!);
+  const confirm = screen.getByLabelText('确认发布');
+
+  try {
+    await user.click(confirm);
+    expect(confirm).toBeDisabled();
+    expect(singlePublish).toBeDisabled();
+    expect(singleDelete).toBeDisabled();
+    act(() => {
+      queryClient.setQueryData(articleKeys.list(DEFAULT_ARTICLE_PARAMS), {
+        items: [{ ...draft, status: 'published' }],
+        total: 1,
+      });
+    });
+    await within(row).findByText('已发布');
+    expect(screen.queryByText('待发布文章已变更，请关闭弹窗后重新选择。')).not.toBeInTheDocument();
+  } finally {
+    finishPublish();
+  }
+
+  expect(await screen.findByText('批量发布失败，请重试')).toBeVisible();
+  await within(row).findByText('草稿');
+  expect(checkbox).toBeChecked();
+});
+
+it('keeps a failed batch publish selected for retry while updating successful articles', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '草稿文章' }),
+    makeArticle({ id: 2, title: '下架文章', status: 'archived' }),
+  ]);
+  server.use(
+    http.patch(
+      '*/api/admin/articles/2',
+      () => HttpResponse.json({ code: 'INTERNAL_ERROR', message: '无法发布' }, { status: 500 }),
+      { once: true },
+    ),
+  );
+  const { user } = renderApp('/admin/articles');
+  const draftRow = (await screen.findByText('草稿文章')).closest('tr')!;
+  const archivedRow = screen.getByText('下架文章').closest('tr')!;
+  await user.click(screen.getByRole('checkbox', { name: '全选当前页' }));
+  await user.click(screen.getByRole('button', { name: '批量发布' }));
+  await user.click(screen.getByLabelText('确认发布'));
+
+  expect(await screen.findByText('已发布 1 篇，1 篇失败')).toBeVisible();
+  expect(await within(draftRow).findByText('已发布')).toBeVisible();
+  expect(within(archivedRow).getByText('已下架')).toBeVisible();
+  expect(within(draftRow).getByRole('checkbox')).not.toBeChecked();
+  expect(within(archivedRow).getByRole('checkbox')).toBeChecked();
+
+  await user.click(screen.getByRole('button', { name: '批量发布' }));
+  await user.click(screen.getByLabelText('确认发布'));
+  expect(await within(archivedRow).findByText('已发布')).toBeVisible();
+  expect(within(archivedRow).getByRole('checkbox')).not.toBeChecked();
+});
+
+it('returns to the first page when batch archiving empties a published page', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '保留文章', status: 'published' }),
+    makeArticle({ id: 2, title: '待下架文章', status: 'published' }),
+  ]);
+  const { user, router } = renderApp(
+    '/admin/articles?page=2&pageSize=1&status=published&sortOrder=asc',
+  );
+  await screen.findByText('待下架文章');
+  await user.click(screen.getByRole('checkbox', { name: '选择《待下架文章》' }));
+  await user.click(screen.getByRole('button', { name: '批量下架' }));
+  await user.click(screen.getByLabelText('确认下架'));
+
+  expect(await screen.findByText('保留文章')).toBeVisible();
+  expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toMatchObject({
+    page: '1',
+    pageSize: '1',
+    status: 'published',
+  });
+});
 
 it('keeps only failed articles selected for a batch deletion retry', async () => {
   resetArticleStore([
@@ -419,6 +539,134 @@ it('returns to the first page after batch deleting the entire second page', asyn
     sortOrder: 'asc',
   });
   expect(screen.queryByRole('button', { name: '批量删除' })).not.toBeInTheDocument();
+});
+
+it.each(['single', 'batch'])(
+  'returns directly to the last available page after %s deletion',
+  async (mode) => {
+    const remaining = makeArticle({ id: 3, title: '保留文章' });
+    resetArticleStore([
+      makeArticle({ id: 1, title: '待删除文章' }),
+      makeArticle({ id: 2, title: '并发移除的文章' }),
+      remaining,
+    ]);
+    server.use(
+      http.delete('*/api/admin/articles/1', () => {
+        resetArticleStore([remaining]);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const { user, router } = renderApp('/admin/articles?page=3&pageSize=1&status=draft');
+    await screen.findByText('待删除文章');
+    const requestedPages: Array<string | null> = [];
+    server.use(
+      http.get('*/api/admin/articles', ({ request }) => {
+        requestedPages.push(new URL(request.url).searchParams.get('page'));
+      }),
+    );
+    if (mode === 'batch') {
+      await user.click(screen.getByLabelText('选择《待删除文章》'));
+      await user.click(screen.getByRole('button', { name: '批量删除' }));
+    } else {
+      await user.click(screen.getByLabelText('删除《待删除文章》'));
+    }
+    await user.click(screen.getByLabelText('确认删除'));
+
+    await waitFor(() =>
+      expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toMatchObject({
+        page: '1',
+        pageSize: '1',
+        status: 'draft',
+      }),
+    );
+    expect(await screen.findByText('保留文章')).toBeVisible();
+    expect(requestedPages).not.toContain('2');
+  },
+);
+
+it.each(['single', 'batch'])(
+  'does not change pagination after browser back during %s deletion',
+  async (mode) => {
+    resetArticleStore([makeArticle({ title: '草稿文章' })]);
+    let finishDeletion!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finishDeletion = resolve;
+    });
+    server.use(
+      http.delete('*/api/admin/articles/1', async () => {
+        await pending;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const previousSearch = '?page=2&pageSize=1&keyword=无匹配';
+    const { user, router, queryClient } = renderApp('/admin/articles', {
+      entries: [`/admin/articles${previousSearch}`, '/admin/articles'],
+      initialIndex: 1,
+    });
+    await screen.findByText('草稿文章');
+    if (mode === 'batch') {
+      await user.click(screen.getByLabelText('选择《草稿文章》'));
+      await user.click(screen.getByRole('button', { name: '批量删除' }));
+    } else {
+      await user.click(screen.getByLabelText('删除《草稿文章》'));
+    }
+
+    try {
+      const confirm = screen.getByLabelText('确认删除');
+      await user.click(confirm);
+      expect(confirm).toBeDisabled();
+      await act(() => router.navigate(-1));
+      await screen.findByText('暂无文章');
+    } finally {
+      finishDeletion();
+    }
+
+    expect(
+      await screen.findByText(mode === 'batch' ? '已删除 1 篇文章' : '删除成功'),
+    ).toBeVisible();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(decodeURI(router.state.location.search)).toBe(previousSearch);
+  },
+);
+
+it('keeps pagination when browser back leaves a list still refreshing after batch deletion', async () => {
+  resetArticleStore([
+    makeArticle({ id: 1, title: '待删除文章' }),
+    makeArticle({ id: 2, title: '保留文章' }),
+  ]);
+  const previousSearch = '?page=2&pageSize=1&keyword=无匹配';
+  const source = '/admin/articles?page=2&pageSize=1';
+  const { user, router, queryClient } = renderApp(source, {
+    entries: [`/admin/articles${previousSearch}`, source],
+    initialIndex: 1,
+  });
+  await screen.findByText('待删除文章');
+  await user.click(screen.getByLabelText('选择《待删除文章》'));
+  await user.click(screen.getByRole('button', { name: '批量删除' }));
+
+  let finishRefresh!: () => void;
+  const pendingRefresh = new Promise<void>((resolve) => {
+    finishRefresh = resolve;
+  });
+  server.use(
+    http.get('*/api/admin/articles', async ({ request }) => {
+      const search = new URL(request.url).searchParams;
+      if (search.has('keyword') || search.get('page') !== '2') return;
+      await pendingRefresh;
+    }),
+  );
+
+  try {
+    await user.click(screen.getByLabelText('确认删除'));
+    expect(await screen.findByText('已删除 1 篇文章')).toBeVisible();
+    expect(screen.getByText('正在后台更新…')).toBeVisible();
+    await act(() => router.navigate(-1));
+    await screen.findByText('暂无文章');
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(decodeURI(router.state.location.search)).toBe(previousSearch);
+  } finally {
+    finishRefresh();
+  }
 });
 
 it('does not restore failed selections after browser history clears them', async () => {
